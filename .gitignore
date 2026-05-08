@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+Colab_MultiAgent_TRS.ipynb
+.env.local
+.agents/
+MultiAgent_TRS_v1.docx
+skills-lock.json

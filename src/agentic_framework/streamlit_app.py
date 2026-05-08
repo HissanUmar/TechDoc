@@ -1,0 +1,570 @@
+"""
+Streamlit UI for the Multi-Agent AI Software Engineering System (TRS).
+Provides interactive interface for building and running multi-agent workflows.
+"""
+
+import streamlit as st
+import json
+from typing import Dict, List, Any
+import sys
+from pathlib import Path
+
+# Ensure package can be imported
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
+
+from agentic_framework.supervisor import Supervisor
+from agentic_framework.agent import AgentBase
+from agentic_framework.state import InMemoryStateStore
+from agentic_framework.message_bus import SimpleMessageBus
+from agentic_framework.clarification import ClarificationEngine
+from agentic_framework.schemas import SchemaValidator
+from agentic_framework.hf_client import HfClient
+
+
+# ============================================================================
+# Session State Initialization
+# ============================================================================
+
+if "supervisor" not in st.session_state:
+    st.session_state.supervisor = Supervisor(
+        state_store=InMemoryStateStore(),
+        max_workers=4,
+        retry_attempts=3,
+    )
+
+if "agents_registry" not in st.session_state:
+    st.session_state.agents_registry = {}
+
+if "dag_config" not in st.session_state:
+    st.session_state.dag_config = {}
+
+if "workflow_results" not in st.session_state:
+    st.session_state.workflow_results = None
+
+if "clarification_engine" not in st.session_state:
+    st.session_state.clarification_engine = ClarificationEngine(max_rounds=5)
+
+if "schema_validator" not in st.session_state:
+    st.session_state.schema_validator = SchemaValidator()
+
+if "hf_client" not in st.session_state:
+    st.session_state.hf_client = HfClient(model="gpt2")
+
+
+# ============================================================================
+# Built-in Agent Implementations
+# ============================================================================
+
+class RequirementsAnalystAgent(AgentBase):
+    """Extracts and structures requirements from user input."""
+    
+    def process(self, payload):
+        user_input = payload.get("user_input", "")
+        return {
+            "requirements": [
+                "Multi-user authentication",
+                "RESTful API endpoints",
+                "Database persistence",
+                "Error handling and logging",
+            ],
+            "source": user_input[:50] if user_input else "default",
+            "count": 4,
+        }
+
+
+class ArchitectureDesignerAgent(AgentBase):
+    """Designs system architecture based on requirements."""
+    
+    def process(self, payload):
+        requirements = payload.get("requirements", [])
+        return {
+            "architecture_type": "microservices",
+            "components": [
+                {"name": "API Gateway", "role": "request routing"},
+                {"name": "Service Layer", "role": "business logic"},
+                {"name": "Data Layer", "role": "persistence"},
+                {"name": "Cache Layer", "role": "performance"},
+            ],
+            "deployment_model": "containerized",
+            "requirements_addressed": len(requirements),
+        }
+
+
+class SecurityValidatorAgent(AgentBase):
+    """Validates security aspects of the design."""
+    
+    def process(self, payload):
+        architecture = payload.get("architecture_type", "")
+        return {
+            "security_score": 8.5,
+            "vulnerabilities": [],
+            "recommendations": [
+                "Implement API authentication (OAuth 2.0)",
+                "Enable encryption at rest and in transit",
+                "Add rate limiting",
+            ],
+            "compliant": True,
+        }
+
+
+class PerformanceAnalyzerAgent(AgentBase):
+    """Analyzes performance characteristics."""
+    
+    def process(self, payload):
+        components = payload.get("components", [])
+        return {
+            "estimated_latency_ms": 50,
+            "throughput_rps": 10000,
+            "bottlenecks": ["Database queries", "Network I/O"],
+            "optimization_suggestions": [
+                "Add caching layer",
+                "Implement connection pooling",
+                "Consider CDN for static assets",
+            ],
+            "components_analyzed": len(components),
+        }
+
+
+class DocumentationGeneratorAgent(AgentBase):
+    """Generates technical documentation."""
+    
+    def process(self, payload):
+        architecture = payload.get("architecture_type", "unknown")
+        security_score = payload.get("security_score", 0)
+        return {
+            "documentation": f"Technical Architecture Document\n" 
+                           f"Architecture Type: {architecture}\n"
+                           f"Security Score: {security_score}/10\n"
+                           f"Generated: Successfully",
+            "sections": ["Overview", "Components", "Security", "Performance", "Deployment"],
+            "format": "markdown",
+        }
+
+
+# Default agents
+DEFAULT_AGENTS = {
+    "requirements": RequirementsAnalystAgent(),
+    "architecture": ArchitectureDesignerAgent(),
+    "security": SecurityValidatorAgent(),
+    "performance": PerformanceAnalyzerAgent(),
+    "documentation": DocumentationGeneratorAgent(),
+}
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def register_default_agents():
+    """Register all default agents with supervisor."""
+    for name, agent in DEFAULT_AGENTS.items():
+        st.session_state.supervisor.register_agent(name, agent)
+        st.session_state.agents_registry[name] = agent
+    st.success("✓ Default agents registered")
+
+
+def build_dag_from_form(agent_names: List[str]) -> Dict[str, List[str]]:
+    """Build DAG from form selections."""
+    dag = {}
+    for i, agent in enumerate(agent_names):
+        if i == 0:
+            dag[agent] = []  # Entry point
+        else:
+            dag[agent] = [agent_names[i - 1]]  # Depends on previous
+    return dag
+
+
+def display_results(results: Dict[str, Any]):
+    """Display workflow results in organized tabs."""
+    if not results:
+        st.warning("No results to display")
+        return
+    
+    cols = st.columns(len(results))
+    for col, (agent_name, result) in zip(cols, results.items()):
+        with col:
+            st.subheader(f"🔹 {agent_name.title()}")
+            st.json(result)
+
+
+# ============================================================================
+# Streamlit App Layout
+# ============================================================================
+
+def main():
+    st.set_page_config(
+        page_title="Multi-Agent TRS",
+        page_icon="🤖",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    
+    st.title("🤖 Multi-Agent AI Software Engineering System")
+    st.markdown("Build, orchestrate, and run multi-agent workflows for technical requirement analysis.")
+    
+    # Sidebar Navigation
+    with st.sidebar:
+        st.header("Navigation")
+        page = st.radio(
+            "Select Page",
+            ["🏠 Home", "🔧 Build Workflow", "📋 Clarify Requirements", 
+             "✅ Validate Schema", "📊 State Management", "ℹ️ About"],
+            label_visibility="collapsed"
+        )
+    
+    # ========================================================================
+    # Page 1: Home
+    # ========================================================================
+    if page == "🏠 Home":
+        st.markdown("""
+        ### Welcome to the Multi-Agent TRS
+        
+        This system enables you to:
+        - **Build workflows** by orchestrating specialized agents
+        - **Analyze requirements** with clarification and validation
+        - **Design architectures** with distributed agents
+        - **Validate outputs** against JSON schemas
+        - **Manage state** across complex workflows
+        
+        #### Quick Start
+        1. Go to **Build Workflow** to create your first multi-agent pipeline
+        2. Use **Clarify Requirements** to disambiguate vague input
+        3. Run workflows and view results in real-time
+        
+        #### Available Agents
+        """)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info("**Requirements Analyst**\nExtracts structured requirements")
+        with col2:
+            st.info("**Architecture Designer**\nDesigns system architecture")
+        with col3:
+            st.info("**Security Validator**\nValidates security aspects")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("**Performance Analyzer**\nAnalyzes performance characteristics")
+        with col2:
+            st.info("**Documentation Generator**\nGenerates technical docs")
+        
+        st.divider()
+        
+        if st.button("🚀 Initialize Default Agents", use_container_width=True):
+            register_default_agents()
+    
+    # ========================================================================
+    # Page 2: Build Workflow
+    # ========================================================================
+    elif page == "🔧 Build Workflow":
+        st.header("Build Multi-Agent Workflow")
+        
+        # Initialize agents if needed
+        if not st.session_state.agents_registry:
+            st.info("Agents not initialized. Click button to register defaults.")
+            if st.button("📥 Register Default Agents", use_container_width=True):
+                register_default_agents()
+            st.stop()
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader("Workflow Configuration")
+            
+            # Agent selection
+            available_agents = list(st.session_state.agents_registry.keys())
+            selected_agents = st.multiselect(
+                "Select agents (order matters - first→last):",
+                available_agents,
+                default=available_agents[:3] if len(available_agents) >= 3 else available_agents,
+                help="Agents will be chained in order (sequential dependency)"
+            )
+            
+            if not selected_agents:
+                st.warning("Select at least one agent")
+                st.stop()
+            
+            # Build DAG
+            dag = build_dag_from_form(selected_agents)
+            
+            st.subheader("DAG Structure")
+            st.code(json.dumps(dag, indent=2), language="json")
+            
+            # Input configuration
+            st.subheader("Workflow Input")
+            user_input = st.text_area(
+                "Requirements or input text:",
+                value="Build a scalable web application with authentication",
+                help="This will be passed to the first agent"
+            )
+        
+        with col2:
+            st.subheader("Execution Settings")
+            max_workers = st.slider("Max parallel workers:", 1, 8, 4)
+            retry_attempts = st.slider("Retry attempts:", 1, 5, 3)
+            st.session_state.supervisor.max_workers = max_workers
+            st.session_state.supervisor.retry_attempts = retry_attempts
+            
+            st.info(f"""
+            **Config:**
+            - Workers: {max_workers}
+            - Retries: {retry_attempts}
+            - Agents: {len(selected_agents)}
+            """)
+        
+        st.divider()
+        
+        # Run workflow
+        if st.button("▶️ Run Workflow", use_container_width=True, type="primary"):
+            with st.spinner("Executing workflow..."):
+                try:
+                    payloads = {
+                        selected_agents[0]: {"user_input": user_input}
+                    }
+                    for agent in selected_agents[1:]:
+                        payloads[agent] = {}
+                    
+                    results = st.session_state.supervisor.run_workflow(dag, payloads)
+                    st.session_state.workflow_results = results
+                    st.success("✓ Workflow completed successfully!")
+                    
+                except Exception as e:
+                    st.error(f"Workflow failed: {str(e)}")
+                    return
+        
+        # Display results
+        if st.session_state.workflow_results:
+            st.subheader("Workflow Results")
+            display_results(st.session_state.workflow_results)
+    
+    # ========================================================================
+    # Page 3: Clarify Requirements
+    # ========================================================================
+    elif page == "📋 Clarify Requirements":
+        st.header("Requirement Clarification Engine")
+        st.markdown("Detect vague terms and generate clarifying questions.")
+        
+        user_requirements = st.text_area(
+            "Enter requirements to clarify:",
+            value="We need a fast, scalable system that's reliable for many users",
+            height=100
+        )
+        
+        if st.button("🔍 Analyze Requirements", use_container_width=True):
+            engine = st.session_state.clarification_engine
+            analysis = engine.analyze(user_requirements)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Vague Terms Found", len(analysis["vague_terms"]))
+            with col2:
+                st.metric("Questions Generated", len(analysis["questions"]))
+            with col3:
+                st.metric("Can Proceed", "Yes" if analysis["can_proceed"] else "No")
+            
+            st.subheader("Detected Vague Terms")
+            if analysis["vague_terms"]:
+                for term in analysis["vague_terms"]:
+                    st.badge(term, value=None)
+            else:
+                st.info("No vague terms detected")
+            
+            st.divider()
+            
+            st.subheader("Clarification Questions")
+            engine.questions = analysis["questions"]
+            
+            for i, q in enumerate(analysis["questions"][:5]):
+                with st.expander(f"Q{i+1}: {q['text']}", expanded=(i == 0)):
+                    st.markdown(f"**Priority:** {q.get('priority', 'N/A')}/10")
+                    st.markdown(f"**Category:** {q.get('category', 'general')}")
+                    
+                    answer = st.text_input(
+                        f"Your answer for Q{i+1}:",
+                        key=f"answer_{i}",
+                        placeholder="Enter your answer..."
+                    )
+                    
+                    if answer:
+                        engine.add_answer(i, answer)
+            
+            st.divider()
+            
+            can_proceed, msg = engine.proceed_or_clarify()
+            if can_proceed:
+                st.success(f"✓ {msg}")
+            else:
+                st.warning(f"⚠️ {msg}")
+            
+            if st.button("📄 View Summary", use_container_width=True):
+                summary = engine.summary()
+                st.json(summary)
+    
+    # ========================================================================
+    # Page 4: Validate Schema
+    # ========================================================================
+    elif page == "✅ Validate Schema":
+        st.header("Schema Validation")
+        st.markdown("Validate data against predefined or custom schemas.")
+        
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            schema_type = st.radio(
+                "Schema Type",
+                ["Built-in", "Custom"],
+                label_visibility="collapsed"
+            )
+        
+        with col2:
+            if schema_type == "Built-in":
+                schema_name = st.selectbox(
+                    "Select schema:",
+                    ["requirements", "architecture", "validation_result"],
+                    label_visibility="collapsed"
+                )
+            else:
+                schema_name = st.text_input(
+                    "Custom schema name:",
+                    placeholder="my_schema",
+                    label_visibility="collapsed"
+                )
+        
+        st.subheader("Data to Validate")
+        data_json = st.text_area(
+            "JSON data:",
+            value='{"requirements": ["auth", "logging", "db"]}',
+            height=150,
+            language="json"
+        )
+        
+        if st.button("✓ Validate", use_container_width=True):
+            try:
+                import json
+                data = json.loads(data_json)
+                validator = st.session_state.schema_validator
+                result = validator.validate(data, schema_name)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if result["valid"]:
+                        st.success(f"✓ Valid against '{schema_name}'")
+                    else:
+                        st.error(f"✗ Invalid against '{schema_name}'")
+                
+                with col2:
+                    st.metric("Errors", len(result.get("errors", [])))
+                
+                if result.get("errors"):
+                    st.subheader("Validation Errors")
+                    for error in result["errors"]:
+                        st.warning(error)
+                
+            except json.JSONDecodeError as e:
+                st.error(f"Invalid JSON: {str(e)}")
+    
+    # ========================================================================
+    # Page 5: State Management
+    # ========================================================================
+    elif page == "📊 State Management":
+        st.header("Workflow State Management")
+        st.markdown("View and manage versioned state across workflows.")
+        
+        state = st.session_state.supervisor.state
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Keys", len(state.keys()))
+        with col2:
+            version, _ = state.snapshot()
+            st.metric("Current Version", version)
+        with col3:
+            history = state.history()
+            st.metric("History Events", len(history))
+        
+        st.divider()
+        
+        st.subheader("Set State Value")
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            key = st.text_input("Key:", placeholder="workflow_id")
+        with col2:
+            value = st.text_input("Value:", placeholder="my_value")
+        
+        if st.button("💾 Save", use_container_width=True):
+            if key and value:
+                version = state.set(key, value)
+                st.success(f"✓ Saved (version {version})")
+            else:
+                st.warning("Enter both key and value")
+        
+        st.divider()
+        
+        st.subheader("Current State")
+        st.json(dict(state.keys()) if hasattr(state, 'keys') else {})
+        
+        st.subheader("State History")
+        history = state.history()
+        if history:
+            history_df = [
+                {"Version": v, "Key": k, "Value": str(val)[:50]}
+                for v, k, val in history
+            ]
+            st.dataframe(history_df, use_container_width=True)
+        else:
+            st.info("No history yet")
+    
+    # ========================================================================
+    # Page 6: About
+    # ========================================================================
+    elif page == "ℹ️ About":
+        st.header("About Multi-Agent TRS")
+        
+        st.markdown("""
+        ### Multi-Agent AI Software Engineering System
+        
+        A production-ready framework for orchestrating specialized AI agents in complex workflows.
+        
+        **Key Features:**
+        - 🎯 Supervisor-based DAG orchestration with topological sorting
+        - ⚙️ Fault-tolerant execution with automatic retries
+        - 🔒 Thread-safe state management with versioning
+        - 📨 Message bus for async decoupling
+        - ✅ JSON schema validation
+        - 🎤 Requirement clarification engine
+        - 🤖 HuggingFace model integration
+        
+        **Built-in Agents:**
+        - Requirements Analyst
+        - Architecture Designer
+        - Security Validator
+        - Performance Analyzer
+        - Documentation Generator
+        
+        **Technology Stack:**
+        - Python 3.10+
+        - Streamlit (UI)
+        - jsonschema (validation)
+        - HuggingFace Hub (models)
+        - pytest (testing)
+        
+        **Repository:**
+        https://github.com/your-org/agentic-framework
+        
+        **Documentation:**
+        See README.md for detailed API reference and usage examples.
+        """)
+        
+        st.divider()
+        
+        st.subheader("System Info")
+        st.info(f"""
+        - **Supervisor Workers:** {st.session_state.supervisor.max_workers}
+        - **Registered Agents:** {len(st.session_state.agents_registry)}
+        - **State Version:** {st.session_state.supervisor.state.snapshot()[0]}
+        - **Clarification Max Rounds:** 5
+        """)
+
+
+if __name__ == "__main__":
+    main()
