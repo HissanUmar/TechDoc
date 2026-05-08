@@ -171,7 +171,7 @@ def test_hf_client_in_agent():
     class LLMAgent(AgentBase):
         def __init__(self):
             super().__init__()
-            self.client = HfClient(model="test-model")
+            self.client = HfClient(model="mistralai/Mistral-7B-Instruct-v0.1", token=None)
 
         def process(self, payload):
             prompt = payload.get("prompt", "hello")
@@ -181,7 +181,8 @@ def test_hf_client_in_agent():
     agent = LLMAgent()
     output = agent.process({"prompt": "What is your name?"})
     assert "ECHO" in output["llm_output"]
-    assert output["model"] == "test-model"
+    # Without token, falls back to gpt2 stub
+    assert output["model"] == "gpt2"
 
 
 def test_parallel_agents_with_state():

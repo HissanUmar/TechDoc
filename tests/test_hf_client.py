@@ -2,8 +2,10 @@ from agentic_framework.hf_client import HfClient
 
 
 def test_hf_client_stub():
-    # Without installing huggingface_hub or providing a token, client should fallback to stub
-    client = HfClient(model="test-model", token=None)
+    # Without token, client should fallback to stub (gpt2)
+    client = HfClient(model="mistralai/Mistral-7B-Instruct-v0.1", token=None)
     out = client.call_model("hello world")
-    assert out["model"] == "test-model"
+    # Should fall back to gpt2 stub since no token provided
+    assert out["model"] == "gpt2"
+    assert out["status"] == "stub"
     assert "ECHO: hello world" in out["output"]
