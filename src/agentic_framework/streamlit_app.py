@@ -716,7 +716,7 @@ def main():
         st.divider()
         
         st.subheader("Current State")
-        st.json_lib(dict(state.keys()) if hasattr(state, 'keys') else {})
+        st.json(dict(state.keys()) if hasattr(state, 'keys') else {})
         
         st.subheader("State History")
         history = state.history()
