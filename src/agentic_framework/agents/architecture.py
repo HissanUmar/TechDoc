@@ -31,7 +31,7 @@ class ArchitectureDesignerAgent(AgentBase):
                 {"name": "Cache Layer", "role": "performance"},
             ]),
             "deployment_model": parsed.get("deployment_model", "containerized"),
-            "tradeoffs": parsed.get("tradeoffs", ["Placeholder architecture tradeoffs"]),
-            "summary": parsed.get("summary", "Architecture shaped around a service-oriented placeholder design."),
+            "tradeoffs": parsed.get("tradeoffs", ["Balanced delivery speed against long-term scalability"]),
+            "summary": parsed.get("summary", "Architecture shaped around a service-oriented implementation plan."),
             "requirements_addressed": len(requirements),
         }

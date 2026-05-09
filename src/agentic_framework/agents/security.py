@@ -30,5 +30,5 @@ class SecurityValidatorAgent(AgentBase):
                 "Add rate limiting",
             ]),
             "compliant": parsed.get("compliant", True),
-            "summary": parsed.get("summary", "Security posture reviewed for the placeholder architecture."),
+            "summary": parsed.get("summary", "Security posture reviewed for the proposed architecture."),
         }

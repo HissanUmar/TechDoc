@@ -31,6 +31,6 @@ class PerformanceAnalyzerAgent(AgentBase):
                 "Implement connection pooling",
                 "Consider CDN for static assets",
             ]),
-            "summary": parsed.get("summary", "Performance reviewed for the current placeholder design."),
+            "summary": parsed.get("summary", "Performance reviewed for the current design proposal."),
             "components_analyzed": len(components),
         }

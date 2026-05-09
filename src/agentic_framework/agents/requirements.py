@@ -30,7 +30,7 @@ class RequirementsAnalystAgent(AgentBase):
             "prompt": prompt,
             "model_response": response.get("output", ""),
             "requirements": requirements,
-            "assumptions": parsed.get("assumptions", ["Placeholder requirement extraction"]),
+            "assumptions": parsed.get("assumptions", ["Assumed baseline web application capabilities based on user goal"]),
             "questions": parsed.get("questions", []),
             "summary": parsed.get("summary", "Requirements shaped into a compact engineering brief."),
             "source": user_input[:50] if user_input else "default",

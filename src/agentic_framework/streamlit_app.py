@@ -5,6 +5,7 @@ Provides interactive interface for building and running multi-agent workflows.
 
 import streamlit as st
 import json as json_lib
+from datetime import datetime
 from typing import Dict, List, Any
 import sys
 from pathlib import Path
@@ -70,6 +71,15 @@ def initialize_session_state():
 
     if "handoff_trace" not in st.session_state:
         st.session_state.handoff_trace = []
+
+    if "latest_run_bundle" not in st.session_state:
+        st.session_state.latest_run_bundle = None
+
+    if "latest_artifact_paths" not in st.session_state:
+        st.session_state.latest_artifact_paths = None
+
+    if "run_history" not in st.session_state:
+        st.session_state.run_history = []
 
 initialize_session_state()
 
@@ -202,6 +212,153 @@ def build_pipeline_analysis() -> Dict[str, Any]:
     }
 
 
+def _build_run_bundle(schema_name: str, gate_result: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
+    run_id = datetime.utcnow().strftime("run-%Y%m%d-%H%M%S")
+    return {
+        "run_id": run_id,
+        "generated_at_utc": datetime.utcnow().isoformat() + "Z",
+        "schema_name": schema_name,
+        "gate": gate_result,
+        "handoff_trace": st.session_state.handoff_trace,
+        "workflow_results": results,
+    }
+
+
+def _bundle_to_markdown(bundle: Dict[str, Any]) -> str:
+    gate = bundle.get("gate", {})
+    lines = [
+        f"# Workflow Run {bundle.get('run_id', 'unknown')}",
+        "",
+        f"- Generated: {bundle.get('generated_at_utc', 'unknown')}",
+        f"- Schema: {bundle.get('schema_name', 'unknown')}",
+        f"- Gate Status: {gate.get('status', 'unknown')}",
+        "",
+        "## Gate Checks",
+    ]
+
+    for check_name, result in gate.get("checks", {}).items():
+        mark = "PASS" if result.get("valid") else "FAIL"
+        lines.append(f"- {check_name}: {mark}")
+        for err in result.get("errors", []):
+            lines.append(f"  - error: {err}")
+
+    lines.extend([
+        "",
+        "## Handoff Trace",
+    ])
+    for handoff in bundle.get("handoff_trace", []):
+        lines.append(f"- {handoff.get('source')} -> {handoff.get('target')}: {handoff.get('summary')}")
+
+    lines.extend([
+        "",
+        "## Workflow Results",
+        "```json",
+        json_lib.dumps(bundle.get("workflow_results", {}), indent=2),
+        "```",
+    ])
+    return "\n".join(lines)
+
+
+def export_run_artifacts(bundle: Dict[str, Any]) -> Dict[str, str]:
+    artifacts_dir = Path("artifacts") / "runs"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    run_id = bundle["run_id"]
+    json_path = artifacts_dir / f"{run_id}.json"
+    md_path = artifacts_dir / f"{run_id}.md"
+
+    json_path.write_text(json_lib.dumps(bundle, indent=2), encoding="utf-8")
+    md_path.write_text(_bundle_to_markdown(bundle), encoding="utf-8")
+
+    return {
+        "json": str(json_path),
+        "markdown": str(md_path),
+    }
+
+
+def summarize_run_changes(previous_bundle: Dict[str, Any] | None, current_bundle: Dict[str, Any]) -> List[str]:
+    """Build a compact change list between two workflow runs."""
+    if previous_bundle is None:
+        return ["Initial run created. No previous execution to compare."]
+
+    changes: List[str] = []
+
+    prev_gate = previous_bundle.get("gate", {}).get("status")
+    cur_gate = current_bundle.get("gate", {}).get("status")
+    if prev_gate != cur_gate:
+        changes.append(f"Gate status changed: {prev_gate} -> {cur_gate}")
+
+    prev_checks = previous_bundle.get("gate", {}).get("checks", {})
+    cur_checks = current_bundle.get("gate", {}).get("checks", {})
+    for name in sorted(set(prev_checks.keys()) | set(cur_checks.keys())):
+        prev_valid = prev_checks.get(name, {}).get("valid")
+        cur_valid = cur_checks.get(name, {}).get("valid")
+        if prev_valid != cur_valid:
+            changes.append(f"Check changed ({name}): {prev_valid} -> {cur_valid}")
+
+    prev_handoffs = len(previous_bundle.get("handoff_trace", []))
+    cur_handoffs = len(current_bundle.get("handoff_trace", []))
+    if prev_handoffs != cur_handoffs:
+        changes.append(f"Handoff count changed: {prev_handoffs} -> {cur_handoffs}")
+
+    prev_reviewer = previous_bundle.get("workflow_results", {}).get("reviewer", {}).get("summary", "")
+    cur_reviewer = current_bundle.get("workflow_results", {}).get("reviewer", {}).get("summary", "")
+    if prev_reviewer != cur_reviewer:
+        changes.append("Reviewer summary changed")
+
+    prev_doc = previous_bundle.get("workflow_results", {}).get("documentation", {}).get("summary", "")
+    cur_doc = current_bundle.get("workflow_results", {}).get("documentation", {}).get("summary", "")
+    if prev_doc != cur_doc:
+        changes.append("Documentation summary changed")
+
+    if not changes:
+        changes.append("No material run-to-run changes detected.")
+    return changes
+
+
+def render_document_screen() -> None:
+    """Render final run artifacts and visible execution changes."""
+    st.markdown("### Document")
+    st.write("Final run output, gate results, and visible changes from execution are shown here.")
+
+    latest_bundle = st.session_state.latest_run_bundle
+    artifact_paths = st.session_state.latest_artifact_paths
+
+    if not latest_bundle or not artifact_paths:
+        st.info("No run artifacts yet. Complete the Workflow -> Validate step first.")
+        return
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Run ID", latest_bundle.get("run_id", "unknown"))
+    with col2:
+        st.metric("Gate", latest_bundle.get("gate", {}).get("status", "unknown"))
+    with col3:
+        st.metric("Handoffs", len(latest_bundle.get("handoff_trace", [])))
+
+    st.markdown("**Visible changes from execution**")
+    for change in latest_bundle.get("changes", []):
+        st.caption(f"- {change}")
+
+    st.markdown("**Artifact paths**")
+    st.code(f"JSON: {artifact_paths['json']}\nMarkdown: {artifact_paths['markdown']}")
+
+    md_path = Path(artifact_paths["markdown"])
+    json_path = Path(artifact_paths["json"])
+
+    with st.expander("View Markdown artifact", expanded=True):
+        if md_path.exists():
+            st.markdown(md_path.read_text(encoding="utf-8"))
+        else:
+            st.warning("Markdown artifact file not found.")
+
+    with st.expander("View JSON artifact", expanded=False):
+        if json_path.exists():
+            st.json(json_lib.loads(json_path.read_text(encoding="utf-8")))
+        else:
+            st.warning("JSON artifact file not found.")
+
+
 def render_pipeline_analysis_card(analysis: Dict[str, Any]):
     """Render the current pipeline/model state in the UI."""
     summary = analysis if isinstance(analysis, dict) and "model" in analysis else build_pipeline_analysis()
@@ -314,16 +471,16 @@ def render_workflow_screen() -> None:
     summary = build_pipeline_analysis()
 
     st.markdown("### Workflow Workspace")
-    st.write("All steps are on one page. Each action uses placeholder logic for now.")
+    st.write("All steps are on one page. Each action executes the active agent chain and records handoffs.")
 
     row1_left, row1_right = st.columns(2)
     with row1_left:
         st.markdown("#### 1. Build Workflow")
         workflow_name = st.text_input("Workflow name", value="Demo workflow", key="workflow_name")
-        workflow_goal = st.text_area("Goal", value="Prepare a short placeholder workflow", height=80, key="workflow_goal")
+        workflow_goal = st.text_area("Goal", value="Prepare a short workflow execution plan", height=80, key="workflow_goal")
         if st.button("Prepare", width="stretch", key="prepare_workflow"):
             st.session_state.workflow_stage = "Build Workflow"
-            st.session_state.workflow_note = "Workflow prepared with placeholder steps"
+            st.session_state.workflow_note = "Workflow plan and requirement extraction completed"
             planner_agent = st.session_state.agents_registry.get("planner")
             requirements_agent = st.session_state.agents_registry.get("requirements")
 
@@ -367,7 +524,7 @@ def render_workflow_screen() -> None:
         brief = st.text_input("Short input", value="Need a fast and reliable app", key="clarify_input")
         if st.button("Analyze", width="stretch", key="analyze_requirements"):
             st.session_state.workflow_stage = "Clarify Requirements"
-            st.session_state.workflow_note = "Placeholder clarification questions created"
+            st.session_state.workflow_note = "Architecture, security, and performance analysis completed"
             architecture_agent = st.session_state.agents_registry.get("architecture")
             security_agent = st.session_state.agents_registry.get("security")
             performance_agent = st.session_state.agents_registry.get("performance")
@@ -401,37 +558,117 @@ def render_workflow_screen() -> None:
         schema_payload = st.text_area("JSON payload", value='{"requirements": ["auth", "logging"]}', height=80, key="schema_payload")
         if st.button("Validate", width="stretch", key="validate_schema"):
             st.session_state.workflow_stage = "Validate Schema"
-            st.session_state.workflow_note = "Placeholder schema check completed"
+            st.session_state.workflow_note = "Running reviewer and schema gate checks"
             reviewer_agent = st.session_state.agents_registry.get("reviewer")
             documentation_agent = st.session_state.agents_registry.get("documentation")
 
             review_result = reviewer_agent.process({"workflow_results": st.session_state.workflow_results, "schema": schema_input})
             publish_handoff("performance", "reviewer", review_result)
 
-            documentation_result = documentation_agent.process({
-                "architecture_type": st.session_state.workflow_results.get("architecture", {}).get("architecture_type", "unknown") if isinstance(st.session_state.workflow_results, dict) else "unknown",
-                "security_score": st.session_state.workflow_results.get("security", {}).get("security_score", 0) if isinstance(st.session_state.workflow_results, dict) else 0,
-                "review": review_result,
-                "schema": schema_input,
-            })
-            publish_handoff("reviewer", "documentation", documentation_result)
+            validator = st.session_state.schema_validator
+            current_results = st.session_state.workflow_results or {}
+            requirements_result = current_results.get("requirements", {})
+            architecture_result = current_results.get("architecture", {})
 
-            st.session_state.workflow_results = {
-                **(st.session_state.workflow_results or {}),
-                "reviewer": review_result,
-                "documentation": documentation_result,
+            requirements_check = validator.validate(
+                {"requirements": requirements_result.get("requirements", [])},
+                "requirements",
+            )
+            architecture_check = validator.validate(
+                {
+                    "architecture": architecture_result.get("architecture_type", "unknown"),
+                    "components": architecture_result.get("components", []),
+                },
+                "architecture",
+            )
+            reviewer_check = validator.validate(
+                {
+                    "valid": bool(review_result.get("ready", False)),
+                    "errors": review_result.get("gaps", []),
+                    "warnings": review_result.get("improvements", []),
+                },
+                "validation",
+            )
+
+            gate_checks = {
+                "requirements_schema": requirements_check,
+                "architecture_schema": architecture_check,
+                "reviewer_gate": reviewer_check,
             }
-            log_activity("Validate Schema", "Done", review_result.get("summary", f"Schema: {schema_input}"), review_result["model_used"])
-            st.json({
-                "review": review_result.get("summary", ""),
-                "documentation": documentation_result.get("summary", ""),
-            })
+            hard_pass = all(v.get("valid", False) for v in gate_checks.values())
+
+            if hard_pass:
+                documentation_result = documentation_agent.process({
+                    "architecture_type": architecture_result.get("architecture_type", "unknown"),
+                    "security_score": current_results.get("security", {}).get("security_score", 0),
+                    "review": review_result,
+                    "schema": schema_input,
+                })
+                publish_handoff("reviewer", "documentation", documentation_result)
+                st.session_state.workflow_results = {
+                    **current_results,
+                    "reviewer": review_result,
+                    "documentation": documentation_result,
+                }
+                gate_status = "passed"
+                st.session_state.workflow_note = "Validation gate passed. Documentation finalized."
+                log_activity("Validate Schema", "Passed", "Reviewer and schema checks passed", review_result["model_used"])
+            else:
+                documentation_result = {
+                    "summary": "Documentation generation blocked by gate failure.",
+                    "blocked": True,
+                }
+                st.session_state.workflow_results = {
+                    **current_results,
+                    "reviewer": review_result,
+                    "documentation": documentation_result,
+                }
+                gate_status = "failed"
+                st.session_state.workflow_note = "Validation gate failed. Resolve schema/reviewer issues."
+                log_activity("Validate Schema", "Failed", "Hard gate failed on reviewer/schema checks", review_result.get("model_used", summary["model"]["used"]))
+
+            gate_result = {
+                "status": gate_status,
+                "checks": gate_checks,
+            }
+            previous_bundle = st.session_state.latest_run_bundle
+            final_bundle = _build_run_bundle(schema_input, gate_result, st.session_state.workflow_results)
+            final_bundle["changes"] = summarize_run_changes(previous_bundle, final_bundle)
+            artifact_paths = export_run_artifacts(final_bundle)
+
+            st.session_state.latest_run_bundle = final_bundle
+            st.session_state.latest_artifact_paths = artifact_paths
+            st.session_state.run_history.append(
+                {
+                    "run_id": final_bundle["run_id"],
+                    "status": gate_status,
+                    "changes": final_bundle["changes"],
+                    "artifacts": artifact_paths,
+                }
+            )
+            st.session_state.run_history = st.session_state.run_history[-10:]
+
+            if hard_pass:
+                st.success("Validation gate passed. Artifacts exported.")
+            else:
+                st.error("Validation gate failed. Artifacts exported with failure report.")
+
+            st.json(
+                {
+                    "gate_status": gate_status,
+                    "checks": gate_checks,
+                    "artifact_json": artifact_paths["json"],
+                    "artifact_markdown": artifact_paths["markdown"],
+                    "review": review_result.get("summary", ""),
+                    "documentation": documentation_result.get("summary", ""),
+                }
+            )
 
     st.divider()
 
     render_pipeline_analysis_card(summary)
 
-    st.caption("The backend pipeline is still placeholder-based. The interface now focuses on the working steps and current state.")
+    st.caption("The workflow executes agent stages, applies hard validation gates, and exports run artifacts for audit and handoff.")
 
 
 # ============================================================================
@@ -457,7 +694,7 @@ def main():
         st.header("Navigation")
         page = st.radio(
             "Select Page",
-            ["🏠 Home", "⚙️ Workflow"],
+            ["🏠 Home", "⚙️ Workflow", "📄 Document"],
             label_visibility="collapsed",
             key="nav_page",
         )
@@ -470,6 +707,10 @@ def main():
 
     if page == "⚙️ Workflow":
         render_workflow_screen()
+        return
+
+    if page == "📄 Document":
+        render_document_screen()
         return
     
     # ========================================================================
