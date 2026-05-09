@@ -13,13 +13,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from agentic_framework.supervisor import Supervisor
-from agentic_framework.agent import AgentBase
-from agentic_framework.state import InMemoryStateStore
 from agentic_framework.database_state import DatabaseStateStore
 from agentic_framework.message_bus import SimpleMessageBus
 from agentic_framework.clarification import ClarificationEngine
 from agentic_framework.schemas import SchemaValidator
 from agentic_framework.hf_client import HfClient
+from agentic_framework.agents import build_default_agents
 
 
 # ============================================================================
@@ -63,143 +62,16 @@ def initialize_session_state():
     if "workflow_note" not in st.session_state:
         st.session_state.workflow_note = "Ready"
 
+    if "workflow_bus" not in st.session_state:
+        st.session_state.workflow_bus = SimpleMessageBus()
+
+    if "workflow_context" not in st.session_state:
+        st.session_state.workflow_context = {}
+
+    if "handoff_trace" not in st.session_state:
+        st.session_state.handoff_trace = []
 
 initialize_session_state()
-
-
-# ============================================================================
-# Built-in Agent Implementations
-# ============================================================================
-
-class RequirementsAnalystAgent(AgentBase):
-    """Extracts and structures requirements from user input."""
-    
-    def __init__(self, model_name: str = "mistralai/Mistral-7B-Instruct-v0.1"):
-        super().__init__()
-        self.model_name = model_name
-        self.model = HfClient(model=model_name)
-    
-    def process(self, payload):
-        user_input = payload.get("user_input", "")
-        return {
-            "model_used": self.model.get_status()["active_model"],
-            "model_status": self.model.get_status(),
-            "requirements": [
-                "Multi-user authentication",
-                "RESTful API endpoints",
-                "Database persistence",
-                "Error handling and logging",
-            ],
-            "source": user_input[:50] if user_input else "default",
-            "count": 4,
-        }
-
-
-class ArchitectureDesignerAgent(AgentBase):
-    """Designs system architecture based on requirements."""
-    
-    def __init__(self, model_name: str = "mistralai/Mistral-7B-Instruct-v0.1"):
-        super().__init__()
-        self.model_name = model_name
-        self.model = HfClient(model=model_name)
-    
-    def process(self, payload):
-        requirements = payload.get("requirements", [])
-        return {
-            "model_used": self.model.get_status()["active_model"],
-            "model_status": self.model.get_status(),
-            "architecture_type": "microservices",
-            "components": [
-                {"name": "API Gateway", "role": "request routing"},
-                {"name": "Service Layer", "role": "business logic"},
-                {"name": "Data Layer", "role": "persistence"},
-                {"name": "Cache Layer", "role": "performance"},
-            ],
-            "deployment_model": "containerized",
-            "requirements_addressed": len(requirements),
-        }
-
-
-class SecurityValidatorAgent(AgentBase):
-    """Validates security aspects of the design."""
-    
-    def __init__(self, model_name: str = "mistralai/Mistral-7B-Instruct-v0.1"):
-        super().__init__()
-        self.model_name = model_name
-        self.model = HfClient(model=model_name)
-    
-    def process(self, payload):
-        architecture = payload.get("architecture_type", "")
-        return {
-            "model_used": self.model.get_status()["active_model"],
-            "model_status": self.model.get_status(),
-            "security_score": 8.5,
-            "vulnerabilities": [],
-            "recommendations": [
-                "Implement API authentication (OAuth 2.0)",
-                "Enable encryption at rest and in transit",
-                "Add rate limiting",
-            ],
-            "compliant": True,
-        }
-
-
-class PerformanceAnalyzerAgent(AgentBase):
-    """Analyzes performance characteristics."""
-    
-    def __init__(self, model_name: str = "mistralai/Mistral-7B-Instruct-v0.1"):
-        super().__init__()
-        self.model_name = model_name
-        self.model = HfClient(model=model_name)
-    
-    def process(self, payload):
-        components = payload.get("components", [])
-        return {
-            "model_used": self.model.get_status()["active_model"],
-            "model_status": self.model.get_status(),
-            "estimated_latency_ms": 50,
-            "throughput_rps": 10000,
-            "bottlenecks": ["Database queries", "Network I/O"],
-            "optimization_suggestions": [
-                "Add caching layer",
-                "Implement connection pooling",
-                "Consider CDN for static assets",
-            ],
-            "components_analyzed": len(components),
-        }
-
-
-class DocumentationGeneratorAgent(AgentBase):
-    """Generates technical documentation."""
-    
-    def __init__(self, model_name: str = "mistralai/Mistral-7B-Instruct-v0.1"):
-        super().__init__()
-        self.model_name = model_name
-        self.model = HfClient(model=model_name)
-    
-    def process(self, payload):
-        architecture = payload.get("architecture_type", "unknown")
-        security_score = payload.get("security_score", 0)
-        return {
-            "model_used": self.model.get_status()["active_model"],
-            "model_status": self.model.get_status(),
-            "documentation": f"Technical Architecture Document\n" 
-                           f"Architecture Type: {architecture}\n"
-                           f"Security Score: {security_score}/10\n"
-                           f"Generated: Successfully",
-            "sections": ["Overview", "Components", "Security", "Performance", "Deployment"],
-            "format": "markdown",
-        }
-
-
-# Default agents
-DEFAULT_AGENTS = {
-    "requirements": RequirementsAnalystAgent(),
-    "architecture": ArchitectureDesignerAgent(),
-    "security": SecurityValidatorAgent(),
-    "performance": PerformanceAnalyzerAgent(),
-    "documentation": DocumentationGeneratorAgent(),
-}
 
 
 # ============================================================================
@@ -209,7 +81,7 @@ DEFAULT_AGENTS = {
 def register_default_agents():
     """Register all default agents with supervisor."""
     initialize_session_state()
-    for name, agent in DEFAULT_AGENTS.items():
+    for name, agent in build_default_agents().items():
         st.session_state.supervisor.register_agent(name, agent)
         st.session_state.agents_registry[name] = agent
     st.success("✓ Default agents registered")
@@ -240,6 +112,39 @@ def log_activity(step: str, status: str, detail: str = "", model: str = "") -> N
     st.session_state.activity_log = st.session_state.activity_log[:8]
 
 
+def publish_handoff(source: str, target: str, payload: Dict[str, Any]) -> None:
+    """Publish a compact handoff message for downstream workflow steps."""
+    initialize_session_state()
+
+    message = {
+        "source": source,
+        "target": target,
+        "payload": payload,
+    }
+    st.session_state.workflow_bus.publish("handoff", message)
+    st.session_state.workflow_context[target] = payload
+    st.session_state.workflow_context["latest_handoff"] = message
+    st.session_state.handoff_trace.append(
+        {
+            "source": source,
+            "target": target,
+            "summary": payload.get("summary") or payload.get("status") or payload.get("result") or "handoff",
+        }
+    )
+    st.session_state.handoff_trace = st.session_state.handoff_trace[-8:]
+
+
+def latest_handoff_message() -> Dict[str, Any] | None:
+    """Get the latest handoff message without consuming the full workflow history."""
+    initialize_session_state()
+    if st.session_state.workflow_bus.empty("handoff"):
+        return None
+    try:
+        return st.session_state.workflow_bus.consume("handoff", timeout=0.01)
+    except Exception:
+        return None
+
+
 def render_sidebar_log_panel() -> None:
     """Render the live activity log in the sidebar."""
     initialize_session_state()
@@ -251,14 +156,21 @@ def render_sidebar_log_panel() -> None:
 
     if not st.session_state.activity_log:
         st.sidebar.info("No activity yet.")
+    else:
+        for entry in st.session_state.activity_log[:5]:
+            model_text = f" | {entry['model'].split('/')[-1]}" if entry.get("model") else ""
+            detail_text = f"\n{entry['detail']}" if entry.get("detail") else ""
+            st.sidebar.markdown(
+                f"**{entry['step']}** · {entry['status']}{model_text}{detail_text}"
+            )
+
+    st.sidebar.markdown("### Handoff Trace")
+    if not st.session_state.handoff_trace:
+        st.sidebar.caption("No handoffs yet.")
         return
 
-    for entry in st.session_state.activity_log[:5]:
-        model_text = f" | {entry['model'].split('/')[-1]}" if entry.get("model") else ""
-        detail_text = f"\n{entry['detail']}" if entry.get("detail") else ""
-        st.sidebar.markdown(
-            f"**{entry['step']}** · {entry['status']}{model_text}{detail_text}"
-        )
+    for entry in st.session_state.handoff_trace[-4:]:
+        st.sidebar.caption(f"{entry['source']} → {entry['target']} : {entry['summary']}")
 
 
 def build_pipeline_analysis() -> Dict[str, Any]:
@@ -288,6 +200,8 @@ def build_pipeline_analysis() -> Dict[str, Any]:
             "history": len(supervisor.state.history()),
         },
     }
+
+
 def render_pipeline_analysis_card(analysis: Dict[str, Any]):
     """Render the current pipeline/model state in the UI."""
     summary = analysis if isinstance(analysis, dict) and "model" in analysis else build_pipeline_analysis()
@@ -307,6 +221,11 @@ def render_pipeline_analysis_card(analysis: Dict[str, Any]):
         st.markdown("**Model details**")
         st.caption(f"Used: {summary['model']['used']}")
         st.caption(f"Status: {summary['model']['status']}")
+        st.caption(f"Token: {'Present' if summary['model']['has_token'] else 'Missing'}")
+
+    latest_handoff = st.session_state.workflow_context.get("latest_handoff")
+    if latest_handoff:
+        st.caption(f"Latest handoff: {latest_handoff['source']} -> {latest_handoff['target']}")
 
 
 def display_results(results: Dict[str, Any]):
@@ -397,8 +316,22 @@ def render_workflow_screen() -> None:
         if st.button("Prepare", width="stretch", key="prepare_workflow"):
             st.session_state.workflow_stage = "Build Workflow"
             st.session_state.workflow_note = "Workflow prepared with placeholder steps"
-            log_activity("Build Workflow", "Done", workflow_goal, summary["model"]["used"])
+            planner_agent = st.session_state.agents_registry.get("planner")
+            requirements_agent = st.session_state.agents_registry.get("requirements")
+
+            planner_result = planner_agent.process({"goal": workflow_goal, "context": {"workflow_name": workflow_name}})
+            publish_handoff("build_workflow", "planner", planner_result)
+
+            requirements_result = requirements_agent.process({"user_input": workflow_goal, "plan": planner_result})
+            publish_handoff("planner", "requirements", requirements_result)
+
+            st.session_state.workflow_results = {
+                "planner": planner_result,
+                "requirements": requirements_result,
+            }
+            log_activity("Build Workflow", "Done", planner_result.get("summary", workflow_goal), planner_result["model_used"])
             st.success(f"Prepared: {workflow_name}")
+            st.json({"plan": planner_result.get("plan", []), "requirements": requirements_result.get("requirements", [])})
 
     with row1_right:
         st.markdown("#### 2. Model Status")
@@ -408,6 +341,15 @@ def render_workflow_screen() -> None:
         if st.button("Refresh status", width="stretch", key="refresh_model_status"):
             st.session_state.workflow_stage = "Model Status"
             st.session_state.workflow_note = "Model status refreshed"
+            publish_handoff(
+                "model_status",
+                "clarify_requirements",
+                {
+                    "model_used": summary["model"]["used"],
+                    "status": summary["model"]["status"],
+                    "token": summary["model"]["has_token"],
+                },
+            )
             log_activity("Model Status", "Checked", "Status refreshed from the client", summary["model"]["used"])
             st.info("Status refreshed")
 
@@ -418,8 +360,32 @@ def render_workflow_screen() -> None:
         if st.button("Analyze", width="stretch", key="analyze_requirements"):
             st.session_state.workflow_stage = "Clarify Requirements"
             st.session_state.workflow_note = "Placeholder clarification questions created"
-            log_activity("Clarify Requirements", "Done", brief, summary["model"]["used"])
-            st.info("Placeholder questions ready: 2")
+            architecture_agent = st.session_state.agents_registry.get("architecture")
+            security_agent = st.session_state.agents_registry.get("security")
+            performance_agent = st.session_state.agents_registry.get("performance")
+
+            requirement_inputs = st.session_state.workflow_results.get("requirements", {}).get("requirements", [brief]) if isinstance(st.session_state.workflow_results, dict) else [brief]
+            architecture_result = architecture_agent.process({"requirements": requirement_inputs})
+            publish_handoff("requirements", "architecture", architecture_result)
+
+            security_result = security_agent.process(architecture_result)
+            publish_handoff("architecture", "security", security_result)
+
+            performance_result = performance_agent.process(architecture_result)
+            publish_handoff("security", "performance", performance_result)
+
+            st.session_state.workflow_results = {
+                **(st.session_state.workflow_results or {}),
+                "architecture": architecture_result,
+                "security": security_result,
+                "performance": performance_result,
+            }
+            log_activity("Clarify Requirements", "Done", architecture_result.get("summary", brief), architecture_result["model_used"])
+            st.json({
+                "architecture": architecture_result.get("summary", ""),
+                "security": security_result.get("summary", ""),
+                "performance": performance_result.get("summary", ""),
+            })
 
     with row2_right:
         st.markdown("#### 4. Validate Schema")
@@ -428,12 +394,34 @@ def render_workflow_screen() -> None:
         if st.button("Validate", width="stretch", key="validate_schema"):
             st.session_state.workflow_stage = "Validate Schema"
             st.session_state.workflow_note = "Placeholder schema check completed"
-            log_activity("Validate Schema", "Done", f"Schema: {schema_input}", summary["model"]["used"])
-            st.success("Placeholder validation passed")
+            reviewer_agent = st.session_state.agents_registry.get("reviewer")
+            documentation_agent = st.session_state.agents_registry.get("documentation")
 
-            st.divider()
+            review_result = reviewer_agent.process({"workflow_results": st.session_state.workflow_results, "schema": schema_input})
+            publish_handoff("performance", "reviewer", review_result)
 
-            render_pipeline_analysis_card(summary)
+            documentation_result = documentation_agent.process({
+                "architecture_type": st.session_state.workflow_results.get("architecture", {}).get("architecture_type", "unknown") if isinstance(st.session_state.workflow_results, dict) else "unknown",
+                "security_score": st.session_state.workflow_results.get("security", {}).get("security_score", 0) if isinstance(st.session_state.workflow_results, dict) else 0,
+                "review": review_result,
+                "schema": schema_input,
+            })
+            publish_handoff("reviewer", "documentation", documentation_result)
+
+            st.session_state.workflow_results = {
+                **(st.session_state.workflow_results or {}),
+                "reviewer": review_result,
+                "documentation": documentation_result,
+            }
+            log_activity("Validate Schema", "Done", review_result.get("summary", f"Schema: {schema_input}"), review_result["model_used"])
+            st.json({
+                "review": review_result.get("summary", ""),
+                "documentation": documentation_result.get("summary", ""),
+            })
+
+    st.divider()
+
+    render_pipeline_analysis_card(summary)
 
     st.caption("The backend pipeline is still placeholder-based. The interface now focuses on the working steps and current state.")
 
