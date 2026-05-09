@@ -249,7 +249,7 @@ def display_results(results: Dict[str, Any]):
                     st.markdown(status_html)
                     st.divider()
             
-            st.json_lib(result)
+            st.json(result)
 
 
 # ============================================================================
@@ -515,7 +515,7 @@ def main():
         st.subheader("⚙️ Configuration")
         
         with st.expander("View Full HF Status JSON", expanded=False):
-            st.json_lib(hf_status)
+            st.json(hf_status)
         
         # Test Model
         st.subheader("🧪 Test Model")
@@ -607,7 +607,7 @@ def main():
             
             if st.button("📄 View Summary", use_container_width=True):
                 summary = engine.summary()
-                st.json_lib(summary)
+                st.json(summary)
     
     # ========================================================================
     # Page 5: Validate Schema
