@@ -350,6 +350,10 @@ def main():
     elif page == "🔧 Build Workflow":
         st.header("Build Multi-Agent Workflow")
         
+        # Ensure session state is initialized (defensive check)
+        if "agents_registry" not in st.session_state:
+            initialize_session_state()
+        
         # Initialize agents if needed
         if not st.session_state.agents_registry:
             st.info("Agents not initialized. Click button to register defaults.")
@@ -434,6 +438,10 @@ def main():
     elif page == "🤖 Model Status":
         st.header("Model Status & Configuration")
         st.markdown("View active models for each agent and model fallback status.")
+        
+        # Ensure session state is initialized (defensive check)
+        if "agents_registry" not in st.session_state:
+            initialize_session_state()
         
         # Initialize agents if needed
         if not st.session_state.agents_registry:
@@ -547,6 +555,9 @@ def main():
         )
         
         if st.button("🔍 Analyze Requirements", use_container_width=True):
+            # Ensure session state is initialized (defensive check)
+            if "clarification_engine" not in st.session_state:
+                initialize_session_state()
             engine = st.session_state.clarification_engine
             analysis = engine.analyze(user_requirements)
             
@@ -636,6 +647,9 @@ def main():
         
         if st.button("✓ Validate", use_container_width=True):
             try:
+                # Ensure session state is initialized (defensive check)
+                if "schema_validator" not in st.session_state:
+                    initialize_session_state()
                 data = json.loads(data_json)
                 validator = st.session_state.schema_validator
                 result = validator.validate(data, schema_name)
@@ -664,6 +678,10 @@ def main():
     elif page == "📊 State Management":
         st.header("Workflow State Management")
         st.markdown("View and manage versioned state across workflows.")
+        
+        # Ensure session state is initialized (defensive check)
+        if "supervisor" not in st.session_state:
+            initialize_session_state()
         
         state = st.session_state.supervisor.state
         
