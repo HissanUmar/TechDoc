@@ -4,7 +4,7 @@ Provides interactive interface for building and running multi-agent workflows.
 """
 
 import streamlit as st
-import json
+import json as json_lib
 from typing import Dict, List, Any
 import sys
 from pathlib import Path
@@ -249,7 +249,7 @@ def display_results(results: Dict[str, Any]):
                     st.markdown(status_html)
                     st.divider()
             
-            st.json(result)
+            st.json_lib(result)
 
 
 # ============================================================================
@@ -385,7 +385,7 @@ def main():
             dag = build_dag_from_form(selected_agents)
             
             st.subheader("DAG Structure")
-            st.code(json.dumps(dag, indent=2), language="json")
+            st.code(json_lib.dumps(dag, indent=2), language="json")
             
             # Input configuration
             st.subheader("Workflow Input")
@@ -515,7 +515,7 @@ def main():
         st.subheader("⚙️ Configuration")
         
         with st.expander("View Full HF Status JSON", expanded=False):
-            st.json(hf_status)
+            st.json_lib(hf_status)
         
         # Test Model
         st.subheader("🧪 Test Model")
@@ -574,7 +574,7 @@ def main():
             st.subheader("Detected Vague Terms")
             if analysis["vague_terms"]:
                 for term in analysis["vague_terms"]:
-                    st.badge(term, value=None)
+                    st.badge(term)
             else:
                 st.info("No vague terms detected")
             
@@ -607,7 +607,7 @@ def main():
             
             if st.button("📄 View Summary", use_container_width=True):
                 summary = engine.summary()
-                st.json(summary)
+                st.json_lib(summary)
     
     # ========================================================================
     # Page 5: Validate Schema
@@ -671,7 +671,7 @@ def main():
                     for error in result["errors"]:
                         st.warning(error)
                 
-            except json.JSONDecodeError as e:
+            except json_lib.JSONDecodeError as e:
                 st.error(f"Invalid JSON: {str(e)}")
     
     # ========================================================================
@@ -716,7 +716,7 @@ def main():
         st.divider()
         
         st.subheader("Current State")
-        st.json(dict(state.keys()) if hasattr(state, 'keys') else {})
+        st.json_lib(dict(state.keys()) if hasattr(state, 'keys') else {})
         
         st.subheader("State History")
         history = state.history()
