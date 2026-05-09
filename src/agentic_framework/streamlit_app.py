@@ -343,7 +343,7 @@ def main():
         
         st.divider()
         
-        if st.button("🚀 Initialize Default Agents", use_container_width=True):
+        if st.button("🚀 Initialize Default Agents", width='stretch'):
             register_default_agents()
     
     # ========================================================================
@@ -359,7 +359,7 @@ def main():
         # Initialize agents if needed
         if not st.session_state.agents_registry:
             st.info("Agents not initialized. Click button to register defaults.")
-            if st.button("📥 Register Default Agents", use_container_width=True):
+            if st.button("📥 Register Default Agents", width='stretch'):
                 register_default_agents()
             st.stop()
         
@@ -412,7 +412,7 @@ def main():
         st.divider()
         
         # Run workflow
-        if st.button("▶️ Run Workflow", use_container_width=True, type="primary"):
+        if st.button("▶️ Run Workflow", width='stretch', type="primary"):
             with st.spinner("Executing workflow..."):
                 try:
                     payloads = {
@@ -448,7 +448,7 @@ def main():
         # Initialize agents if needed
         if not st.session_state.agents_registry:
             st.info("Agents not initialized. Click button to register defaults.")
-            if st.button("📥 Register Default Agents", use_container_width=True):
+            if st.button("📥 Register Default Agents", width='stretch'):
                 register_default_agents()
             st.stop()
         
@@ -488,7 +488,7 @@ def main():
                 "Details": status if isinstance(status, str) else "success",
             })
         
-        st.dataframe(fallback_data, use_container_width=True)
+        st.dataframe(fallback_data, width='stretch')
         
         st.divider()
         
@@ -507,7 +507,7 @@ def main():
         
         if agent_models:
             agent_data = list(agent_models.values())
-            st.dataframe(agent_data, use_container_width=True)
+            st.dataframe(agent_data, width='stretch')
         
         st.divider()
         
@@ -525,7 +525,7 @@ def main():
             placeholder="Enter a test prompt..."
         )
         
-        if st.button("▶️ Run Test", use_container_width=True):
+        if st.button("▶️ Run Test", width='stretch'):
             with st.spinner("Testing model..."):
                 try:
                     response = hf_client.call_model(test_prompt)
@@ -556,7 +556,7 @@ def main():
             height=100
         )
         
-        if st.button("🔍 Analyze Requirements", use_container_width=True):
+        if st.button("🔍 Analyze Requirements", width='stretch'):
             # Ensure session state is initialized (defensive check)
             if "clarification_engine" not in st.session_state:
                 initialize_session_state()
@@ -574,7 +574,11 @@ def main():
             st.subheader("Detected Vague Terms")
             if analysis["vague_terms"]:
                 for term in analysis["vague_terms"]:
-                    st.badge(term)
+                    if isinstance(term, dict):
+                        term_text = term.get("text") or term.get("term") or str(term)
+                    else:
+                        term_text = str(term)
+                    st.badge(term_text)
             else:
                 st.info("No vague terms detected")
             
@@ -605,7 +609,7 @@ def main():
             else:
                 st.warning(f"⚠️ {msg}")
             
-            if st.button("📄 View Summary", use_container_width=True):
+            if st.button("📄 View Summary", width='stretch'):
                 summary = engine.summary()
                 st.json(summary)
     
@@ -647,7 +651,7 @@ def main():
             language="json"
         )
         
-        if st.button("✓ Validate", use_container_width=True):
+        if st.button("✓ Validate", width='stretch'):
             try:
                 # Ensure session state is initialized (defensive check)
                 if "schema_validator" not in st.session_state:
@@ -706,7 +710,7 @@ def main():
         with col2:
             value = st.text_input("Value:", placeholder="my_value")
         
-        if st.button("💾 Save", use_container_width=True):
+        if st.button("💾 Save", width='stretch'):
             if key and value:
                 version = state.set(key, value)
                 st.success(f"✓ Saved (version {version})")
@@ -725,7 +729,7 @@ def main():
                 {"Version": v, "Key": k, "Value": str(val)[:50]}
                 for v, k, val in history
             ]
-            st.dataframe(history_df, use_container_width=True)
+            st.dataframe(history_df, width='stretch')
         else:
             st.info("No history yet")
     
