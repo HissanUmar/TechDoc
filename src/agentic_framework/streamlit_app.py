@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 from agentic_framework.supervisor import Supervisor
 from agentic_framework.agent import AgentBase
 from agentic_framework.state import InMemoryStateStore
+from agentic_framework.database_state import DatabaseStateStore
 from agentic_framework.message_bus import SimpleMessageBus
 from agentic_framework.clarification import ClarificationEngine
 from agentic_framework.schemas import SchemaValidator
@@ -28,8 +29,9 @@ from agentic_framework.hf_client import HfClient
 def initialize_session_state():
     """Initialize all Streamlit session state values used by the app."""
     if "supervisor" not in st.session_state:
+        # Use persistent DatabaseStateStore for durability across Colab session restarts
         st.session_state.supervisor = Supervisor(
-            state_store=InMemoryStateStore(),
+            state_store=DatabaseStateStore(),
             max_workers=4,
             retry_attempts=3,
         )
