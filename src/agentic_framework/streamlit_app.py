@@ -217,6 +217,89 @@ def build_dag_from_form(agent_names: List[str]) -> Dict[str, List[str]]:
     return dag
 
 
+def build_pipeline_analysis() -> Dict[str, Any]:
+    """Build a compact status summary for the current pipeline and model setup."""
+    initialize_session_state()
+
+    supervisor = st.session_state.supervisor
+    hf_status = st.session_state.hf_client.get_status()
+    agent_status = {}
+
+    for agent_name, agent in st.session_state.agents_registry.items():
+        if hasattr(agent, "model"):
+            agent_status[agent_name] = agent.model.get_status()
+
+    current_state = supervisor.state
+    snapshot_version, snapshot_data = current_state.snapshot()
+    history = current_state.history()
+
+    return {
+        "pipeline": {
+            "registered_agents": list(st.session_state.agents_registry.keys()),
+            "registered_count": len(st.session_state.agents_registry),
+            "max_workers": supervisor.max_workers,
+            "retry_attempts": supervisor.retry_attempts,
+        },
+        "models": {
+            "requested_model": hf_status.get("requested_model"),
+            "active_model": hf_status.get("active_model"),
+            "client_available": hf_status.get("client_available", False),
+            "has_token": hf_status.get("has_token", False),
+            "attempted_models": hf_status.get("attempted_models", {}),
+            "agent_models": {
+                agent_name: status.get("active_model", "unknown")
+                for agent_name, status in agent_status.items()
+            },
+        },
+        "state": {
+            "version": snapshot_version,
+            "key_count": len(snapshot_data),
+            "history_events": len(history),
+            "keys": list(snapshot_data.keys())[:10],
+        },
+    }
+
+
+def render_pipeline_analysis_card(analysis: Dict[str, Any]):
+    """Render the current pipeline/model state in the UI."""
+    st.subheader("📌 Current Pipeline Analysis")
+
+    pipeline = analysis["pipeline"]
+    models = analysis["models"]
+    state = analysis["state"]
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Registered Agents", pipeline["registered_count"])
+        st.caption(", ".join(pipeline["registered_agents"]) or "No agents registered")
+    with col2:
+        active_model = models["active_model"] or "unknown"
+        st.metric("Active Model", active_model.split("/")[-1] if "/" in active_model else active_model)
+        st.caption("Fallback chain is already tracked in the model status page")
+    with col3:
+        st.metric("State Version", state["version"])
+        st.caption(f"{state['key_count']} keys, {state['history_events']} history events")
+
+    st.markdown("**What is done so far**")
+    progress_items = [
+        f"Agents registered: {pipeline['registered_count']}",
+        f"Pipeline workers configured: {pipeline['max_workers']}",
+        f"Retry policy set to: {pipeline['retry_attempts']}",
+        f"Active model: {models['active_model']}",
+        f"HF token present: {'yes' if models['has_token'] else 'no'}",
+        f"State keys tracked: {state['key_count']}",
+    ]
+    for item in progress_items:
+        st.write(f"- {item}")
+
+    if models["agent_models"]:
+        with st.expander("View per-agent model status", expanded=False):
+            st.json(models["agent_models"])
+
+    with st.expander("View raw pipeline analysis", expanded=False):
+        st.json(analysis)
+
+
 def display_results(results: Dict[str, Any]):
     """Display workflow results in organized tabs with model info prominent."""
     if not results:
@@ -341,6 +424,10 @@ def main():
         Each agent shows which model it's actually using in the results.
         """)
         
+        st.divider()
+
+        render_pipeline_analysis_card(build_pipeline_analysis())
+
         st.divider()
         
         if st.button("🚀 Initialize Default Agents", width='stretch'):
@@ -693,6 +780,10 @@ def main():
     elif page == "📊 State Management":
         st.header("Workflow State Management")
         st.markdown("View and manage versioned state across workflows.")
+
+        render_pipeline_analysis_card(build_pipeline_analysis())
+
+        st.divider()
         
         # Ensure session state is initialized (defensive check)
         if "supervisor" not in st.session_state:
