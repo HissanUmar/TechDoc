@@ -303,6 +303,14 @@ def render_home_screen() -> None:
 def render_workflow_screen() -> None:
     """Render the single workflow workspace with all steps visible at once."""
     initialize_session_state()
+
+    required_agents = set(build_default_agents().keys())
+    registered_agents = set(st.session_state.agents_registry.keys())
+    if not required_agents.issubset(registered_agents):
+        register_default_agents()
+        st.session_state.workflow_note = "Default agents auto-loaded for the workflow"
+        log_activity("Agents", "Loaded", "Auto-registered required agents", st.session_state.hf_client.get_status()["active_model"])
+
     summary = build_pipeline_analysis()
 
     st.markdown("### Workflow Workspace")
