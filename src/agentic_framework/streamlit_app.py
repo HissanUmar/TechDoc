@@ -636,7 +636,6 @@ def main():
         
         if st.button("✓ Validate", use_container_width=True):
             try:
-                import json
                 data = json.loads(data_json)
                 validator = st.session_state.schema_validator
                 result = validator.validate(data, schema_name)
