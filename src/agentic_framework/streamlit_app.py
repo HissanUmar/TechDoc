@@ -54,6 +54,15 @@ def initialize_session_state():
     if "hf_client" not in st.session_state:
         st.session_state.hf_client = HfClient(model="mistralai/Mistral-7B-Instruct-v0.1")
 
+    if "activity_log" not in st.session_state:
+        st.session_state.activity_log = []
+
+    if "workflow_stage" not in st.session_state:
+        st.session_state.workflow_stage = "Home"
+
+    if "workflow_note" not in st.session_state:
+        st.session_state.workflow_note = "Ready"
+
 
 initialize_session_state()
 
@@ -217,87 +226,89 @@ def build_dag_from_form(agent_names: List[str]) -> Dict[str, List[str]]:
     return dag
 
 
+def log_activity(step: str, status: str, detail: str = "", model: str = "") -> None:
+    """Store a compact activity entry for the sidebar log."""
+    initialize_session_state()
+
+    entry = {
+        "step": step,
+        "status": status,
+        "detail": detail,
+        "model": model,
+    }
+    st.session_state.activity_log.insert(0, entry)
+    st.session_state.activity_log = st.session_state.activity_log[:8]
+
+
+def render_sidebar_log_panel() -> None:
+    """Render the live activity log in the sidebar."""
+    initialize_session_state()
+
+    st.sidebar.markdown("### Live Log")
+    st.sidebar.caption("Small progress notes from the current session.")
+    st.sidebar.markdown(f"**Stage:** {st.session_state.workflow_stage}")
+    st.sidebar.caption(st.session_state.workflow_note)
+
+    if not st.session_state.activity_log:
+        st.sidebar.info("No activity yet.")
+        return
+
+    for entry in st.session_state.activity_log[:5]:
+        model_text = f" | {entry['model'].split('/')[-1]}" if entry.get("model") else ""
+        detail_text = f"\n{entry['detail']}" if entry.get("detail") else ""
+        st.sidebar.markdown(
+            f"**{entry['step']}** · {entry['status']}{model_text}{detail_text}"
+        )
+
+
 def build_pipeline_analysis() -> Dict[str, Any]:
     """Build a compact status summary for the current pipeline and model setup."""
     initialize_session_state()
 
     supervisor = st.session_state.supervisor
     hf_status = st.session_state.hf_client.get_status()
-    agent_status = {}
-
-    for agent_name, agent in st.session_state.agents_registry.items():
-        if hasattr(agent, "model"):
-            agent_status[agent_name] = agent.model.get_status()
-
-    current_state = supervisor.state
-    snapshot_version, snapshot_data = current_state.snapshot()
-    history = current_state.history()
+    active_model = hf_status.get("active_model", "unknown")
 
     return {
+        "stage": st.session_state.workflow_stage,
+        "note": st.session_state.workflow_note,
         "pipeline": {
-            "registered_agents": list(st.session_state.agents_registry.keys()),
             "registered_count": len(st.session_state.agents_registry),
             "max_workers": supervisor.max_workers,
             "retry_attempts": supervisor.retry_attempts,
         },
-        "models": {
-            "requested_model": hf_status.get("requested_model"),
-            "active_model": hf_status.get("active_model"),
-            "client_available": hf_status.get("client_available", False),
+        "model": {
+            "used": active_model,
+            "status": "Live" if hf_status.get("client_available", False) else "Fallback",
             "has_token": hf_status.get("has_token", False),
-            "attempted_models": hf_status.get("attempted_models", {}),
-            "agent_models": {
-                agent_name: status.get("active_model", "unknown")
-                for agent_name, status in agent_status.items()
-            },
         },
         "state": {
-            "version": snapshot_version,
-            "key_count": len(snapshot_data),
-            "history_events": len(history),
-            "keys": list(snapshot_data.keys())[:10],
+            "version": supervisor.state.snapshot()[0],
+            "keys": len(supervisor.state.keys()),
+            "history": len(supervisor.state.history()),
         },
     }
-
-
 def render_pipeline_analysis_card(analysis: Dict[str, Any]):
     """Render the current pipeline/model state in the UI."""
-    st.subheader("📌 Current Pipeline Analysis")
+    summary = analysis if isinstance(analysis, dict) and "model" in analysis else build_pipeline_analysis()
 
-    pipeline = analysis["pipeline"]
-    models = analysis["models"]
-    state = analysis["state"]
+    st.subheader("📌 Current Status")
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Registered Agents", pipeline["registered_count"])
-        st.caption(", ".join(pipeline["registered_agents"]) or "No agents registered")
+        st.metric("Model", summary["model"]["used"].split("/")[-1] if "/" in summary["model"]["used"] else summary["model"]["used"])
+        st.caption(summary["model"]["status"])
     with col2:
-        active_model = models["active_model"] or "unknown"
-        st.metric("Active Model", active_model.split("/")[-1] if "/" in active_model else active_model)
-        st.caption("Fallback chain is already tracked in the model status page")
+        st.metric("Stage", summary["stage"])
+        st.caption(summary["note"])
     with col3:
-        st.metric("State Version", state["version"])
-        st.caption(f"{state['key_count']} keys, {state['history_events']} history events")
+        st.metric("State", f"v{summary['state']['version']}")
+        st.caption(f"{summary['state']['keys']} keys · {summary['state']['history']} events")
 
-    st.markdown("**What is done so far**")
-    progress_items = [
-        f"Agents registered: {pipeline['registered_count']}",
-        f"Pipeline workers configured: {pipeline['max_workers']}",
-        f"Retry policy set to: {pipeline['retry_attempts']}",
-        f"Active model: {models['active_model']}",
-        f"HF token present: {'yes' if models['has_token'] else 'no'}",
-        f"State keys tracked: {state['key_count']}",
-    ]
-    for item in progress_items:
-        st.write(f"- {item}")
-
-    if models["agent_models"]:
-        with st.expander("View per-agent model status", expanded=False):
-            st.json(models["agent_models"])
-
-    with st.expander("View raw pipeline analysis", expanded=False):
-        st.json(analysis)
+    st.markdown("**Done so far**")
+    st.write(f"- Agents ready: {summary['pipeline']['registered_count']}")
+    st.write(f"- Workers: {summary['pipeline']['max_workers']}")
+    st.write(f"- Retry attempts: {summary['pipeline']['retry_attempts']}")
 
 
 def display_results(results: Dict[str, Any]):
@@ -335,6 +346,108 @@ def display_results(results: Dict[str, Any]):
             st.json(result)
 
 
+def render_home_screen() -> None:
+    """Render a concise landing page with the essential app summary."""
+    summary = build_pipeline_analysis()
+
+    st.markdown("### Multi-Agent TRS")
+    st.write("One clean workflow page for setup, model status, clarification, and validation.")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Model", summary["model"]["used"].split("/")[-1] if "/" in summary["model"]["used"] else summary["model"]["used"])
+    with col2:
+        st.metric("Status", summary["model"]["status"])
+    with col3:
+        st.metric("Stage", summary["stage"])
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.markdown("**What this app does**")
+        st.write("- Prepares a workflow")
+        st.write("- Shows concise model status")
+        st.write("- Helps clarify requirements")
+        st.write("- Checks schema input")
+    with col2:
+        st.markdown("**Current snapshot**")
+        st.write(f"- Agents ready: {summary['pipeline']['registered_count']}")
+        st.write(f"- State version: {summary['state']['version']}")
+        st.write(f"- State keys: {summary['state']['keys']}")
+        st.write(f"- Note: {summary['note']}")
+
+    if st.button("Open Workflow", width="stretch"):
+        st.session_state.nav_page = "⚙️ Workflow"
+        st.session_state.workflow_stage = "Workflow"
+        st.session_state.workflow_note = "Opened from Home"
+        log_activity("Home", "Opened", "Moved into the workflow workspace", summary["model"]["used"])
+        st.rerun()
+
+
+def render_workflow_screen() -> None:
+    """Render the single workflow workspace with all steps visible at once."""
+    initialize_session_state()
+    summary = build_pipeline_analysis()
+
+    st.markdown("### Workflow Workspace")
+    st.write("All steps are on one page. Each action uses placeholder logic for now.")
+
+    top1, top2, top3 = st.columns(3)
+    with top1:
+        st.metric("Model", summary["model"]["used"].split("/")[-1] if "/" in summary["model"]["used"] else summary["model"]["used"])
+    with top2:
+        st.metric("Status", summary["model"]["status"])
+    with top3:
+        st.metric("Stage", summary["stage"])
+
+    render_pipeline_analysis_card(summary)
+
+    st.divider()
+
+    row1_left, row1_right = st.columns(2)
+    with row1_left:
+        st.markdown("#### 1. Build Workflow")
+        workflow_name = st.text_input("Workflow name", value="Demo workflow", key="workflow_name")
+        workflow_goal = st.text_area("Goal", value="Prepare a short placeholder workflow", height=80, key="workflow_goal")
+        if st.button("Prepare", width="stretch", key="prepare_workflow"):
+            st.session_state.workflow_stage = "Build Workflow"
+            st.session_state.workflow_note = "Workflow prepared with placeholder steps"
+            log_activity("Build Workflow", "Done", workflow_goal, summary["model"]["used"])
+            st.success(f"Prepared: {workflow_name}")
+
+    with row1_right:
+        st.markdown("#### 2. Model Status")
+        st.write(f"**Model used:** {summary['model']['used']}")
+        st.write(f"**Status:** {summary['model']['status']}")
+        st.write(f"**Token:** {'Present' if summary['model']['has_token'] else 'Missing'}")
+        if st.button("Refresh status", width="stretch", key="refresh_model_status"):
+            st.session_state.workflow_stage = "Model Status"
+            st.session_state.workflow_note = "Model status refreshed"
+            log_activity("Model Status", "Checked", "Status refreshed from the client", summary["model"]["used"])
+            st.info("Status refreshed")
+
+    row2_left, row2_right = st.columns(2)
+    with row2_left:
+        st.markdown("#### 3. Clarify Requirements")
+        brief = st.text_input("Short input", value="Need a fast and reliable app", key="clarify_input")
+        if st.button("Analyze", width="stretch", key="analyze_requirements"):
+            st.session_state.workflow_stage = "Clarify Requirements"
+            st.session_state.workflow_note = "Placeholder clarification questions created"
+            log_activity("Clarify Requirements", "Done", brief, summary["model"]["used"])
+            st.info("Placeholder questions ready: 2")
+
+    with row2_right:
+        st.markdown("#### 4. Validate Schema")
+        schema_input = st.text_input("Schema name", value="requirements", key="schema_input")
+        schema_payload = st.text_area("JSON payload", value='{"requirements": ["auth", "logging"]}', height=80, key="schema_payload")
+        if st.button("Validate", width="stretch", key="validate_schema"):
+            st.session_state.workflow_stage = "Validate Schema"
+            st.session_state.workflow_note = "Placeholder schema check completed"
+            log_activity("Validate Schema", "Done", f"Schema: {schema_input}", summary["model"]["used"])
+            st.success("Placeholder validation passed")
+
+    st.caption("The backend pipeline is still placeholder-based. The interface now focuses on the working steps and current state.")
+
+
 # ============================================================================
 # Streamlit App Layout
 # ============================================================================
@@ -358,10 +471,20 @@ def main():
         st.header("Navigation")
         page = st.radio(
             "Select Page",
-            ["🏠 Home", "🔧 Build Workflow", "🤖 Model Status",
-             "📋 Clarify Requirements", "✅ Validate Schema", "📊 State Management", "ℹ️ About"],
-            label_visibility="collapsed"
+            ["🏠 Home", "⚙️ Workflow"],
+            label_visibility="collapsed",
+            key="nav_page",
         )
+        st.divider()
+        render_sidebar_log_panel()
+
+    if page == "🏠 Home":
+        render_home_screen()
+        return
+
+    if page == "⚙️ Workflow":
+        render_workflow_screen()
+        return
     
     # ========================================================================
     # Page 1: Home
