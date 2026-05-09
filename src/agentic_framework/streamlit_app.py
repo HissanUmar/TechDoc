@@ -25,30 +25,35 @@ from agentic_framework.hf_client import HfClient
 # Session State Initialization
 # ============================================================================
 
-if "supervisor" not in st.session_state:
-    st.session_state.supervisor = Supervisor(
-        state_store=InMemoryStateStore(),
-        max_workers=4,
-        retry_attempts=3,
-    )
+def initialize_session_state():
+    """Initialize all Streamlit session state values used by the app."""
+    if "supervisor" not in st.session_state:
+        st.session_state.supervisor = Supervisor(
+            state_store=InMemoryStateStore(),
+            max_workers=4,
+            retry_attempts=3,
+        )
 
-if "agents_registry" not in st.session_state:
-    st.session_state.agents_registry = {}
+    if "agents_registry" not in st.session_state:
+        st.session_state.agents_registry = {}
 
-if "dag_config" not in st.session_state:
-    st.session_state.dag_config = {}
+    if "dag_config" not in st.session_state:
+        st.session_state.dag_config = {}
 
-if "workflow_results" not in st.session_state:
-    st.session_state.workflow_results = None
+    if "workflow_results" not in st.session_state:
+        st.session_state.workflow_results = None
 
-if "clarification_engine" not in st.session_state:
-    st.session_state.clarification_engine = ClarificationEngine(max_rounds=5)
+    if "clarification_engine" not in st.session_state:
+        st.session_state.clarification_engine = ClarificationEngine(max_rounds=5)
 
-if "schema_validator" not in st.session_state:
-    st.session_state.schema_validator = SchemaValidator()
+    if "schema_validator" not in st.session_state:
+        st.session_state.schema_validator = SchemaValidator()
 
-if "hf_client" not in st.session_state:
-    st.session_state.hf_client = HfClient(model="gpt2")
+    if "hf_client" not in st.session_state:
+        st.session_state.hf_client = HfClient(model="mistralai/Mistral-7B-Instruct-v0.1")
+
+
+initialize_session_state()
 
 
 # ============================================================================
@@ -192,6 +197,7 @@ DEFAULT_AGENTS = {
 
 def register_default_agents():
     """Register all default agents with supervisor."""
+    initialize_session_state()
     for name, agent in DEFAULT_AGENTS.items():
         st.session_state.supervisor.register_agent(name, agent)
         st.session_state.agents_registry[name] = agent
@@ -249,6 +255,9 @@ def display_results(results: Dict[str, Any]):
 # ============================================================================
 
 def main():
+    # Ensure session state is initialized before any access
+    initialize_session_state()
+    
     st.set_page_config(
         page_title="Multi-Agent TRS",
         page_icon="🤖",
