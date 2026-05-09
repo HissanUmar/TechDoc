@@ -305,10 +305,16 @@ def render_pipeline_analysis_card(analysis: Dict[str, Any]):
         st.metric("State", f"v{summary['state']['version']}")
         st.caption(f"{summary['state']['keys']} keys · {summary['state']['history']} events")
 
-    st.markdown("**Done so far**")
-    st.write(f"- Agents ready: {summary['pipeline']['registered_count']}")
-    st.write(f"- Workers: {summary['pipeline']['max_workers']}")
-    st.write(f"- Retry attempts: {summary['pipeline']['retry_attempts']}")
+    left, right = st.columns([1, 1])
+    with left:
+        st.markdown("**Done so far**")
+        st.caption(f"Agents ready: {summary['pipeline']['registered_count']}")
+        st.caption(f"Workers: {summary['pipeline']['max_workers']}")
+        st.caption(f"Retry attempts: {summary['pipeline']['retry_attempts']}")
+    with right:
+        st.markdown("**Model details**")
+        st.caption(f"Used: {summary['model']['used']}")
+        st.caption(f"Status: {summary['model']['status']}")
 
 
 def display_results(results: Dict[str, Any]):
