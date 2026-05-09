@@ -294,16 +294,8 @@ def render_pipeline_analysis_card(analysis: Dict[str, Any]):
 
     st.subheader("📌 Current Status")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Model", summary["model"]["used"].split("/")[-1] if "/" in summary["model"]["used"] else summary["model"]["used"])
-        st.caption(summary["model"]["status"])
-    with col2:
-        st.metric("Stage", summary["stage"])
-        st.caption(summary["note"])
-    with col3:
-        st.metric("State", f"v{summary['state']['version']}")
-        st.caption(f"{summary['state']['keys']} keys · {summary['state']['history']} events")
+    st.caption(f"Stage: {summary['stage']} · Note: {summary['note']}")
+    st.caption(f"State v{summary['state']['version']} · {summary['state']['keys']} keys · {summary['state']['history']} events")
 
     left, right = st.columns([1, 1])
     with left:
@@ -397,18 +389,6 @@ def render_workflow_screen() -> None:
     st.markdown("### Workflow Workspace")
     st.write("All steps are on one page. Each action uses placeholder logic for now.")
 
-    top1, top2, top3 = st.columns(3)
-    with top1:
-        st.metric("Model", summary["model"]["used"].split("/")[-1] if "/" in summary["model"]["used"] else summary["model"]["used"])
-    with top2:
-        st.metric("Status", summary["model"]["status"])
-    with top3:
-        st.metric("Stage", summary["stage"])
-
-    render_pipeline_analysis_card(summary)
-
-    st.divider()
-
     row1_left, row1_right = st.columns(2)
     with row1_left:
         st.markdown("#### 1. Build Workflow")
@@ -450,6 +430,10 @@ def render_workflow_screen() -> None:
             st.session_state.workflow_note = "Placeholder schema check completed"
             log_activity("Validate Schema", "Done", f"Schema: {schema_input}", summary["model"]["used"])
             st.success("Placeholder validation passed")
+
+            st.divider()
+
+            render_pipeline_analysis_card(summary)
 
     st.caption("The backend pipeline is still placeholder-based. The interface now focuses on the working steps and current state.")
 
