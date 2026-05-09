@@ -588,16 +588,25 @@ def main():
             engine.questions = analysis["questions"]
             
             for i, q in enumerate(analysis["questions"][:5]):
-                with st.expander(f"Q{i+1}: {q['text']}", expanded=(i == 0)):
-                    st.markdown(f"**Priority:** {q.get('priority', 'N/A')}/10")
-                    st.markdown(f"**Category:** {q.get('category', 'general')}")
-                    
+                if isinstance(q, dict):
+                    q_text = q.get("text") or q.get("question") or q.get("title") or str(q)
+                    priority = q.get("priority", "N/A")
+                    category = q.get("category", "general")
+                else:
+                    q_text = str(q)
+                    priority = "N/A"
+                    category = "general"
+
+                with st.expander(f"Q{i+1}: {q_text}", expanded=(i == 0)):
+                    st.markdown(f"**Priority:** {priority}/10")
+                    st.markdown(f"**Category:** {category}")
+
                     answer = st.text_input(
                         f"Your answer for Q{i+1}:",
                         key=f"answer_{i}",
                         placeholder="Enter your answer..."
                     )
-                    
+
                     if answer:
                         engine.add_answer(i, answer)
             
