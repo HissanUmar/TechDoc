@@ -181,8 +181,8 @@ def test_hf_client_in_agent():
     agent = LLMAgent()
     output = agent.process({"prompt": "What is your name?"})
     assert "ECHO" in output["llm_output"]
-    # Without token, falls back to gpt2 stub
-    assert output["model"] == "gpt2"
+    # Without token, returns stub response but reports requested model name
+    assert output["model"] == "mistralai/Mistral-7B-Instruct-v0.1"
 
 
 def test_parallel_agents_with_state():

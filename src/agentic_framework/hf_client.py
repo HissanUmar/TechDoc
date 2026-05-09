@@ -46,8 +46,10 @@ class HfClient:
             from huggingface_hub import InferenceApi  # type: ignore
 
             if not self.token:
-                logger.warning("HF token not found; falling back to stub client")
-                self.model = "gpt2"
+                logger.warning("HF token not found; using requested model as stub (no HF token)")
+                # Keep the requested model name for transparency, but no live client
+                self.model = self.requested_model
+                self.attempted_models[self.requested_model] = "no_token"
                 return
 
             # Try each model in the chain
@@ -71,13 +73,15 @@ class HfClient:
                     )
                     continue
 
-            # All models failed, use stub
-            logger.warning("All HF models failed; using stub client")
-            self.model = "gpt2"
+            # All models failed to initialize; keep requested model as stub
+            logger.warning("All HF models failed; keeping requested model as stub")
+            self.model = self.requested_model
 
         except Exception:  # pragma: no cover
-            logger.info("huggingface_hub not available; using stub client")
-            self.model = "gpt2"
+            logger.info("huggingface_hub not available; using requested model as stub")
+            # If SDK isn't installed, keep requested model name for transparency
+            self.model = self.requested_model
+            self.attempted_models[self.requested_model] = "no_sdk"
 
     def call_model(self, prompt: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """Call the model. Returns a dict with at least `model` and `output`.
@@ -112,12 +116,12 @@ class HfClient:
                 logger.exception("Error calling HF InferenceApi: %s", e)
                 # fallback to stub behavior on error
 
-        # stub echo response
+        # stub echo response (no live client)
         return {
             "model": self.model,
             "output": f"ECHO: {prompt}",
             "raw": None,
-            "status": "stub" if self.model == "gpt2" else "fallback",
+            "status": "stub",
         }
 
     def get_status(self) -> Dict[str, Any]:
