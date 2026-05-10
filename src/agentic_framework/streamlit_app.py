@@ -489,6 +489,149 @@ def render_workflow_screen() -> None:
     st.markdown("### Workflow Workspace")
     st.write("All steps are on one page. Each action executes the active agent chain and records handoffs.")
 
+    # --- Run Full Pipeline button ---------------------------------------
+    if st.button("▶️ Run Full Pipeline", width='stretch'):
+        initialize_session_state()
+        # Ensure agents are registered
+        if not st.session_state.agents_registry:
+            register_default_agents()
+
+        progress_placeholder = st.empty()
+        progress_lines: List[str] = []
+
+        def append_progress(event: Dict[str, Any]) -> None:
+            event_name = event.get("event", "progress")
+            if event_name == "agent_start":
+                line = f"Starting {event.get('agent')}"
+            elif event_name == "agent_end":
+                line = f"Finished {event.get('agent')}"
+            elif event_name == "decision":
+                line = f"Selected {event.get('agent')}: {event.get('reason', 'no reason provided')}"
+            elif event_name == "planner_complete":
+                line = f"Planner suggested: {', '.join(event.get('next_candidates', [])) or 'none'}"
+            elif event_name == "fallback_plan":
+                line = f"Using fallback order: {', '.join(event.get('next_candidates', [])) or 'none'}"
+            elif event_name == "review_check":
+                line = f"Review check after {event.get('after')}"
+            elif event_name == "review_result":
+                line = f"Reviewer ready={event.get('ready')}"
+            elif event_name == "stop":
+                line = f"Stopping: {event.get('reason')}"
+            elif event_name == "skip":
+                line = f"Skipping {event.get('agent')}: {event.get('reason')}"
+            else:
+                line = event_name
+
+            progress_lines.append(line)
+            progress_placeholder.markdown(
+                "\n".join([f"- {item}" for item in progress_lines[-12:]])
+            )
+            log_activity("Pipeline", event_name, line, st.session_state.hf_client.get_status().get("active_model", ""))
+
+        # Build initial context
+        problem = st.session_state.get("workflow_goal") or st.session_state.get("clarify_input") or "User problem not provided"
+        initial_context = {"problem_statement": problem, "workflow_name": st.session_state.get("workflow_name")}
+
+        # Run adaptive workflow via supervisor
+        try:
+            results, exec_order = st.session_state.supervisor.run_adaptive_workflow(
+                initial_context,
+                progress_callback=append_progress,
+            )
+        except Exception as e:
+            st.error(f"Pipeline failed: {e}")
+            raise
+
+        # Persist results and publish handoffs in the order executed
+        st.session_state.workflow_results = results
+        prev = "start"
+        for node in exec_order:
+            payload = results.get(node, {})
+            publish_handoff(prev, node, payload if isinstance(payload, dict) else {"result": str(payload)})
+            prev = node
+
+        # Run validation and documentation similar to manual Validate flow
+        st.session_state.workflow_stage = "Validate Schema"
+        st.session_state.workflow_note = "Running reviewer and schema gate checks"
+
+        reviewer_result = results.get("reviewer")
+        if reviewer_result is None and "reviewer" in st.session_state.agents_registry:
+            reviewer_agent = st.session_state.agents_registry.get("reviewer")
+            reviewer_result = reviewer_agent.process({"workflow_results": st.session_state.workflow_results})
+            publish_handoff(prev, "reviewer", reviewer_result)
+
+        validator = st.session_state.schema_validator
+        current_results = st.session_state.workflow_results or {}
+        requirements_result = current_results.get("requirements", {})
+        architecture_result = current_results.get("architecture", {})
+
+        requirements_check = validator.validate(
+            {"requirements": requirements_result.get("requirements", [])},
+            "requirements",
+        )
+        architecture_check = validator.validate(
+            {
+                "architecture": architecture_result.get("architecture_type", "unknown"),
+                "components": architecture_result.get("components", []),
+            },
+            "architecture",
+        )
+        reviewer_check = validator.validate(
+            {
+                "valid": bool(reviewer_result and reviewer_result.get("ready", False)),
+                "errors": reviewer_result.get("gaps", []) if isinstance(reviewer_result, dict) else [],
+                "warnings": reviewer_result.get("improvements", []) if isinstance(reviewer_result, dict) else [],
+            },
+            "validation",
+        )
+
+        gate_checks = {
+            "requirements_schema": requirements_check,
+            "architecture_schema": architecture_check,
+            "reviewer_gate": reviewer_check,
+        }
+        hard_pass = all(v.get("valid", False) for v in gate_checks.values())
+
+        if hard_pass and "documentation" in st.session_state.agents_registry:
+            documentation_agent = st.session_state.agents_registry.get("documentation")
+            documentation_result = documentation_agent.process({
+                "problem_statement": problem,
+                "requirements": requirements_result.get("requirements", []),
+                "assumptions": requirements_result.get("assumptions", []),
+                "questions": requirements_result.get("questions", []),
+                "architecture_type": architecture_result.get("architecture_type", "unknown"),
+                "architecture_summary": architecture_result.get("summary", ""),
+                "security_score": current_results.get("security", {}).get("security_score", 0),
+                "security_summary": current_results.get("security", {}).get("summary", ""),
+                "performance_summary": current_results.get("performance", {}).get("summary", ""),
+                "review": reviewer_result,
+                "schema": st.session_state.get("schema_input", "requirements"),
+            })
+            publish_handoff("reviewer", "documentation", documentation_result)
+            st.session_state.workflow_results = {**current_results, "documentation": documentation_result, "reviewer": reviewer_result}
+            gate_status = "passed"
+        else:
+            documentation_result = {"summary": "Documentation generation blocked by gate failure.", "blocked": True}
+            st.session_state.workflow_results = {**current_results, "reviewer": reviewer_result, "documentation": documentation_result}
+            gate_status = "failed"
+
+        gate_result = {"status": gate_status, "checks": gate_checks}
+        previous_bundle = st.session_state.latest_run_bundle
+        final_bundle = _build_run_bundle(st.session_state.get("schema_input", "requirements"), gate_result, st.session_state.workflow_results)
+        final_bundle["changes"] = summarize_run_changes(previous_bundle, final_bundle)
+        artifact_paths = export_run_artifacts(final_bundle)
+
+        st.session_state.latest_run_bundle = final_bundle
+        st.session_state.latest_artifact_paths = artifact_paths
+        st.session_state.run_history.append({"run_id": final_bundle["run_id"], "status": gate_status, "changes": final_bundle["changes"], "artifacts": artifact_paths})
+        st.session_state.run_history = st.session_state.run_history[-10:]
+
+        if gate_status == "passed":
+            st.success("Pipeline completed and validated. Artifacts exported.")
+        else:
+            st.error("Pipeline completed but validation failed. Artifacts exported with failure report.")
+
+
     row1_left, row1_right = st.columns(2)
     with row1_left:
         st.markdown("#### 1. Build Workflow")
@@ -622,6 +765,8 @@ def render_workflow_screen() -> None:
                 documentation_result = documentation_agent.process({
                     "problem_statement": problem_statement,
                     "requirements": requirements_result.get("requirements", []),
+                    "assumptions": requirements_result.get("assumptions", []),
+                    "questions": requirements_result.get("questions", []),
                     "architecture_type": architecture_result.get("architecture_type", "unknown"),
                     "architecture_summary": architecture_result.get("summary", ""),
                     "security_score": current_results.get("security", {}).get("security_score", 0),

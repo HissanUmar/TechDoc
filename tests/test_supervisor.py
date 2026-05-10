@@ -26,6 +26,26 @@ class FailNTimesAgent(AgentBase):
         return {"ok": True}
 
 
+class PlannerAgent(AgentBase):
+    def process(self, payload):
+        return {
+            "next_agent": "requirements",
+            "plan": ["requirements", "architecture", "documentation"],
+            "summary": "Plan generated",
+        }
+
+
+class ReviewerAgent(AgentBase):
+    def process(self, payload):
+        workflow_results = payload.get("workflow_results", {})
+        return {
+            "ready": "architecture" in workflow_results,
+            "gaps": [] if "architecture" in workflow_results else ["Need architecture"],
+            "improvements": [],
+            "summary": "Reviewed",
+        }
+
+
 def test_simple_dag_execution():
     # A and B -> C
     sup = Supervisor(max_workers=3)
@@ -62,3 +82,50 @@ def test_retry_exhausts_and_raises():
     dag = {"bad": []}
     with pytest.raises(RuntimeError):
         sup.run_workflow(dag)
+
+
+def test_adaptive_workflow_streams_progress_and_stops_when_ready():
+    sup = Supervisor(max_workers=1)
+    sup.register_agent("planner", PlannerAgent())
+    sup.register_agent("requirements", SimpleAgent("requirements"))
+    sup.register_agent("architecture", SimpleAgent("architecture"))
+    sup.register_agent("documentation", SimpleAgent("documentation"))
+    sup.register_agent("reviewer", ReviewerAgent())
+
+    events = []
+
+    def capture(event):
+        events.append(event)
+
+    results, order = sup.run_adaptive_workflow(
+        {"problem_statement": "Build a product"},
+        progress_callback=capture,
+    )
+
+    assert "planner" in results
+    assert "requirements" in results
+    assert "architecture" in results
+    assert "documentation" not in results
+    assert any(event["event"] == "decision" and event.get("reason") for event in events)
+    assert any(event["event"] == "planner_complete" for event in events)
+    assert any(event["event"] == "review_result" and event["ready"] is True for event in events)
+    assert any(event["event"] == "stop" and event["reason"] == "reviewer_ready" for event in events)
+    assert order[0] == "planner"
+
+
+def test_adaptive_workflow_uses_fallback_plan_when_planner_absent():
+    sup = Supervisor(max_workers=1)
+    sup.register_agent("requirements", SimpleAgent("requirements"))
+    sup.register_agent("architecture", SimpleAgent("architecture"))
+
+    events = []
+
+    results, order = sup.run_adaptive_workflow(
+        {"problem_statement": "Build a product"},
+        progress_callback=events.append,
+    )
+
+    assert "requirements" in results
+    assert "architecture" in results
+    assert any(event["event"] == "fallback_plan" for event in events)
+    assert order[0] == "requirements"

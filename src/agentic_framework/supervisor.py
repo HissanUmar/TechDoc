@@ -2,7 +2,7 @@ import concurrent.futures
 import logging
 import threading
 import time
-from typing import Dict, Any, List, Iterable
+from typing import Dict, Any, List, Iterable, Callable
 
 from .agent import AgentBase
 from .state import InMemoryStateStore
@@ -227,4 +227,100 @@ class Supervisor:
                     raise RuntimeError(f"Node {node} failed after {self.retry_attempts} attempts: {msg.get('error')}")
 
         return results
+
+    def run_adaptive_workflow(
+        self,
+        initial_context: Dict[str, Any],
+        max_steps: int = 20,
+        progress_callback: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> (Dict[str, Any], List[str]):
+        """Run an adaptive pipeline where the supervisor chooses which agent to run next.
+
+        Behavior:
+        - Call the `planner` agent first (if registered) to obtain a suggested `next_agent` or `plan`.
+        - Execute agents iteratively following the planner suggestion. After each agent run,
+          check the `reviewer` agent (if registered) to determine if the workflow is ready.
+        - Stop early when the `reviewer` indicates `ready: True` or when no more agents are suggested.
+
+        Returns a tuple of (results_mapping, execution_order_list).
+        """
+        if not isinstance(initial_context, dict):
+            raise TypeError("initial_context must be a dict")
+
+        results: Dict[str, Any] = {}
+        order: List[str] = []
+
+        def _emit(event: str, **data: Any) -> None:
+            if progress_callback is not None:
+                progress_callback({"event": event, **data})
+
+        # Helper to safely run an agent and record result
+        def _run(name: str, payload: Dict[str, Any] | None = None):
+            _emit("agent_start", agent=name, payload_keys=sorted((payload or {}).keys()))
+            res = self.start_agent(name, payload or {})
+            results[name] = res
+            order.append(name)
+            _emit("agent_end", agent=name, result_keys=sorted(res.keys()) if isinstance(res, dict) else [])
+            return res
+
+        # 1) Planner step (optional)
+        next_candidates: List[str] = []
+        candidate_reasons: Dict[str, str] = {}
+        if "planner" in self.agents:
+            _emit("decision", agent="planner", reason="bootstrap workflow from the user problem statement")
+            plan_res = _run("planner", {"goal": initial_context.get("problem_statement", ""), "context": initial_context})
+            # planner may expose next_agent or plan list
+            if isinstance(plan_res, dict):
+                na = plan_res.get("next_agent")
+                if na:
+                    next_candidates.append(na)
+                    candidate_reasons[na] = "planner chose this next agent"
+                plan_list = plan_res.get("plan") or []
+                for step in plan_list:
+                    if isinstance(step, str) and step not in next_candidates:
+                        next_candidates.append(step)
+                    if isinstance(step, str):
+                        candidate_reasons.setdefault(step, "planner included this step in its plan")
+            _emit("planner_complete", next_candidates=list(next_candidates))
+
+        # Fallback to known agent ordering if none suggested
+        if not next_candidates:
+            next_candidates = [n for n in list(self.agents.keys()) if n != "planner"]
+            for name in next_candidates:
+                candidate_reasons[name] = "fallback ordering because planner did not return a next step"
+            _emit("fallback_plan", next_candidates=list(next_candidates))
+
+        steps = 0
+        # Execute adaptively
+        for candidate in next_candidates:
+            if steps >= max_steps:
+                _emit("stop", reason="max_steps_reached", steps=steps)
+                break
+            if candidate not in self.agents:
+                _emit("skip", agent=candidate, reason="not_registered")
+                continue
+
+            # build payload from current context and accumulated results
+            payload = {"initial_context": initial_context, "workflow_results": results}
+            _emit("decision", agent=candidate, reason=candidate_reasons.get(candidate, "selected by supervisor"))
+            _run(candidate, payload)
+            steps += 1
+
+            # after each agent, ask reviewer if present
+            if "reviewer" in self.agents:
+                rev_payload = {"workflow_results": results}
+                _emit("review_check", agent="reviewer", after=candidate)
+                rev_res = self.start_agent("reviewer", rev_payload)
+                results["reviewer"] = rev_res
+                if "reviewer" not in order:
+                    order.append("reviewer")
+                ready = isinstance(rev_res, dict) and rev_res.get("ready")
+                _emit("review_result", ready=ready, gaps=rev_res.get("gaps", []) if isinstance(rev_res, dict) else [])
+                if ready:
+                    _emit("stop", reason="reviewer_ready", after=candidate)
+                    break
+        else:
+            _emit("stop", reason="plan_exhausted")
+
+        return results, order
 
