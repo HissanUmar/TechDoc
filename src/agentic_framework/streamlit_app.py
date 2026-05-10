@@ -212,15 +212,31 @@ def build_pipeline_analysis() -> Dict[str, Any]:
     }
 
 
+def _sanitize_public_results(value: Any) -> Any:
+    """Strip internal LLM plumbing fields from user-facing output artifacts."""
+    if isinstance(value, dict):
+        hidden_keys = {"prompt", "model_response"}
+        cleaned: Dict[str, Any] = {}
+        for key, item in value.items():
+            if key in hidden_keys:
+                continue
+            cleaned[key] = _sanitize_public_results(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_sanitize_public_results(item) for item in value]
+    return value
+
+
 def _build_run_bundle(schema_name: str, gate_result: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
     run_id = datetime.utcnow().strftime("run-%Y%m%d-%H%M%S")
+    public_results = _sanitize_public_results(results)
     return {
         "run_id": run_id,
         "generated_at_utc": datetime.utcnow().isoformat() + "Z",
         "schema_name": schema_name,
         "gate": gate_result,
         "handoff_trace": st.session_state.handoff_trace,
-        "workflow_results": results,
+        "workflow_results": public_results,
     }
 
 
@@ -598,9 +614,19 @@ def render_workflow_screen() -> None:
             hard_pass = all(v.get("valid", False) for v in gate_checks.values())
 
             if hard_pass:
+                problem_statement = (
+                    st.session_state.get("workflow_goal")
+                    or st.session_state.get("clarify_input")
+                    or "User problem statement not provided."
+                )
                 documentation_result = documentation_agent.process({
+                    "problem_statement": problem_statement,
+                    "requirements": requirements_result.get("requirements", []),
                     "architecture_type": architecture_result.get("architecture_type", "unknown"),
+                    "architecture_summary": architecture_result.get("summary", ""),
                     "security_score": current_results.get("security", {}).get("security_score", 0),
+                    "security_summary": current_results.get("security", {}).get("summary", ""),
+                    "performance_summary": current_results.get("performance", {}).get("summary", ""),
                     "review": review_result,
                     "schema": schema_input,
                 })

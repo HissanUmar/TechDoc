@@ -151,10 +151,12 @@ def documentation_prompt(context: Dict[str, Any]) -> str:
     return f"""You are the Documentation Generator.
 
 Goal:
-- Produce a concise technical summary suitable for the workflow output.
+- Produce a concise delivery document about the user's requested problem and solution.
 
 Rules:
 - Keep it short and readable.
+- Focus on the user problem statement, key requirements, architecture choice, security/performance posture, and next actions.
+- Do not describe internal prompts, model internals, chain-of-thought, or agent orchestration mechanics.
 - Return valid JSON only with keys:
   - documentation: string
   - sections: list of strings
