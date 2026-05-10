@@ -242,15 +242,96 @@ def _build_run_bundle(schema_name: str, gate_result: Dict[str, Any], results: Di
 
 def _bundle_to_markdown(bundle: Dict[str, Any]) -> str:
     gate = bundle.get("gate", {})
+    workflow_results = bundle.get("workflow_results", {}) or {}
+    documentation = workflow_results.get("documentation", {}) if isinstance(workflow_results, dict) else {}
+    documentation_text = ""
+    if isinstance(documentation, dict):
+        documentation_text = documentation.get("documentation") or documentation.get("summary") or ""
+    elif isinstance(documentation, str):
+        documentation_text = documentation
+
+    requirements = workflow_results.get("requirements", {}) if isinstance(workflow_results, dict) else {}
+    assumptions = requirements.get("assumptions", []) if isinstance(requirements, dict) else []
+    req_items = requirements.get("requirements", []) if isinstance(requirements, dict) else []
+    questions = requirements.get("questions", []) if isinstance(requirements, dict) else []
+    architecture = workflow_results.get("architecture", {}) if isinstance(workflow_results, dict) else {}
+    security = workflow_results.get("security", {}) if isinstance(workflow_results, dict) else {}
+    performance = workflow_results.get("performance", {}) if isinstance(workflow_results, dict) else {}
+
     lines = [
-        f"# Workflow Run {bundle.get('run_id', 'unknown')}",
+        f"# Final Project Document",
         "",
         f"- Generated: {bundle.get('generated_at_utc', 'unknown')}",
+        f"- Run ID: {bundle.get('run_id', 'unknown')}",
         f"- Schema: {bundle.get('schema_name', 'unknown')}",
-        f"- Gate Status: {gate.get('status', 'unknown')}",
+        f"- Validation Gate: {gate.get('status', 'unknown')}",
         "",
-        "## Gate Checks",
+        "## Project Overview",
+        documentation_text.splitlines()[0] if documentation_text else "No project overview available.",
+        "",
+        "## Requirements",
     ]
+
+    if req_items:
+        for index, requirement in enumerate(req_items, start=1):
+            lines.append(f"{index}. {requirement}")
+    else:
+        lines.append("No functional requirements captured.")
+
+    lines.extend([
+        "",
+        "## Assumptions",
+    ])
+    if assumptions:
+        for assumption in assumptions:
+            lines.append(f"- {assumption}")
+    else:
+        lines.append("- None recorded.")
+
+    lines.extend([
+        "",
+        "## Clarifications Resolved",
+    ])
+    if questions:
+        for question in questions:
+            lines.append(f"- {question}")
+    else:
+        lines.append("- No open questions remained at validation time.")
+
+    lines.extend([
+        "",
+        "## Suggested Database Schema",
+    ])
+    if isinstance(documentation, dict) and documentation.get("documentation"):
+        # Keep the schema guidance inside the final document content if the agent produced it.
+        doc_lines = documentation.get("documentation", "").splitlines()
+        schema_section_started = False
+        for line in doc_lines:
+            if line.strip().lower().startswith("## suggested database schema"):
+                schema_section_started = True
+                continue
+            if line.strip().startswith("## ") and schema_section_started:
+                break
+            if schema_section_started:
+                lines.append(line)
+        if not schema_section_started:
+            lines.append("No schema guidance was produced.")
+    else:
+        lines.append("No schema guidance was produced.")
+
+    lines.extend([
+        "",
+        "## Architecture Summary",
+        architecture.get("summary", "No architecture summary available.") if isinstance(architecture, dict) else str(architecture),
+        "",
+        "## Security Summary",
+        security.get("summary", "No security summary available.") if isinstance(security, dict) else str(security),
+        "",
+        "## Performance Summary",
+        performance.get("summary", "No performance summary available.") if isinstance(performance, dict) else str(performance),
+        "",
+        "## Validation Checks",
+    ])
 
     for check_name, result in gate.get("checks", {}).items():
         mark = "PASS" if result.get("valid") else "FAIL"
@@ -264,14 +345,6 @@ def _bundle_to_markdown(bundle: Dict[str, Any]) -> str:
     ])
     for handoff in bundle.get("handoff_trace", []):
         lines.append(f"- {handoff.get('source')} -> {handoff.get('target')}: {handoff.get('summary')}")
-
-    lines.extend([
-        "",
-        "## Workflow Results",
-        "```json",
-        json_lib.dumps(bundle.get("workflow_results", {}), indent=2),
-        "```",
-    ])
     return "\n".join(lines)
 
 
@@ -360,19 +433,12 @@ def render_document_screen() -> None:
     st.code(f"JSON: {artifact_paths['json']}\nMarkdown: {artifact_paths['markdown']}")
 
     md_path = Path(artifact_paths["markdown"])
-    json_path = Path(artifact_paths["json"])
 
-    with st.expander("View Markdown artifact", expanded=True):
+    with st.expander("Rendered final document", expanded=True):
         if md_path.exists():
-            st.markdown(md_path.read_text(encoding="utf-8"))
+            st.markdown(md_path.read_text(encoding="utf-8"), unsafe_allow_html=False)
         else:
             st.warning("Markdown artifact file not found.")
-
-    with st.expander("View JSON artifact", expanded=False):
-        if json_path.exists():
-            st.json(json_lib.loads(json_path.read_text(encoding="utf-8")))
-        else:
-            st.warning("JSON artifact file not found.")
 
 
 def render_pipeline_analysis_card(analysis: Dict[str, Any]):
