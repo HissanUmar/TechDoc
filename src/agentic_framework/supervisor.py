@@ -270,7 +270,8 @@ class Supervisor:
         candidate_reasons: Dict[str, str] = {}
         if "planner" in self.agents:
             _emit("decision", agent="planner", reason="bootstrap workflow from the user problem statement")
-            plan_res = _run("planner", {"goal": initial_context.get("problem_statement", ""), "context": initial_context})
+            available_agents = [n for n in list(self.agents.keys()) if n not in {"planner", "reviewer", "documentation"}]
+            plan_res = _run("planner", {"goal": initial_context.get("problem_statement", ""), "context": initial_context, "available_agents": available_agents})
             # planner may expose next_agent or plan list
             if isinstance(plan_res, dict):
                 na = plan_res.get("next_agent")
@@ -346,9 +347,8 @@ class Supervisor:
                     coverage_score=coverage_score,
                     gaps=rev_res.get("gaps", []) if isinstance(rev_res, dict) else [],
                 )
-                if ready:
-                    _emit("stop", reason="coverage_sufficient", after=candidate)
-                    break
+                # Note: Do NOT break the loop. Let planner's full sequence execute.
+                # Reviewer monitors coverage but does not gate the pipeline.
         else:
             _emit("stop", reason="plan_exhausted")
 

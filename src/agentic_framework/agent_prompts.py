@@ -74,7 +74,10 @@ Clarification answers already provided:
 """
 
 
-def planner_prompt(goal: str, context: Dict[str, Any]) -> str:
+def planner_prompt(goal: str, context: Dict[str, Any], available_agents: List[str] | None = None) -> str:
+    if available_agents is None:
+        available_agents = ["requirements", "architecture", "security", "performance", "documentation"]
+    agents_list = ", ".join(available_agents)
     return f"""You are the Planner.
 
 Goal:
@@ -82,11 +85,15 @@ Goal:
 
 Rules:
 - Keep the plan compact and ordered.
+- Choose only from the AVAILABLE AGENTS list below.
 - Return valid JSON only with keys:
-    - plan: list of short step strings
-    - dependencies: list of strings
-    - next_agent: string
+    - plan: list of agent names (must be chosen from the available agents list)
+    - dependencies: list of agent names
+    - next_agent: string (must be one of the available agents)
     - summary: one short string
+
+AVAILABLE AGENTS:
+{agents_list}
 
 User goal:
 {goal}

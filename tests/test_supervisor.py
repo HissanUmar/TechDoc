@@ -148,11 +148,13 @@ def test_adaptive_workflow_streams_progress_and_stops_when_ready():
     assert "planner" in results
     assert "requirements" in results
     assert "architecture" in results
-    assert "documentation" not in results
+    # Now that reviewer doesn't gate the pipeline, all planned agents execute
+    assert "documentation" in results
     assert any(event["event"] == "decision" and event.get("reason") for event in events)
     assert any(event["event"] == "planner_complete" for event in events)
-    assert any(event["event"] == "review_result" and event["ready"] is True for event in events)
-    assert any(event["event"] == "stop" and event["reason"] == "coverage_sufficient" for event in events)
+    assert any(event["event"] == "review_result" for event in events)
+    # Stop reason is now plan_exhausted, not coverage_sufficient
+    assert any(event["event"] == "stop" and event["reason"] == "plan_exhausted" for event in events)
     assert order[0] == "planner"
 
 
@@ -201,7 +203,8 @@ def test_adaptive_workflow_pauses_for_clarification_then_resumes_with_answers():
 
     assert "clarification_needed" not in results
     assert "architecture" in results
-    assert any(event["event"] == "stop" and event["reason"] == "coverage_sufficient" for event in events)
+    # Reviewer now monitors coverage but doesn't gate; planner's full sequence executes
+    assert any(event["event"] == "stop" and event["reason"] == "plan_exhausted" for event in events)
 
 
 def test_adaptive_workflow_honors_completeness_tolerance():
@@ -223,4 +226,5 @@ def test_adaptive_workflow_honors_completeness_tolerance():
 
     assert "architecture" in results
     assert any(event["event"] == "review_result" and event.get("coverage_score") == 85 for event in events)
-    assert any(event["event"] == "stop" and event["reason"] == "coverage_sufficient" for event in events)
+    # Reviewer monitors coverage but no longer gates pipeline; plan executes fully
+    assert any(event["event"] == "stop" and event["reason"] == "plan_exhausted" for event in events)

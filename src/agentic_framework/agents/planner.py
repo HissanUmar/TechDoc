@@ -17,14 +17,15 @@ class PlannerAgent(AgentBase):
     def process(self, payload: Dict[str, Any]):
         goal = payload.get("goal", "")
         context = payload.get("context", {})
-        prompt = planner_prompt(goal, context)
+        available_agents = payload.get("available_agents", ["requirements", "architecture", "security", "performance", "documentation"])
+        prompt = planner_prompt(goal, context, available_agents)
         response, parsed, status = run_prompted_model(self.model, prompt)
         return {
             "model_used": status["active_model"],
             "model_status": status,
             "prompt": prompt,
             "model_response": response.get("output", ""),
-            "plan": parsed.get("plan", ["Understand the goal", "Produce a compact agent plan"]),
+            "plan": parsed.get("plan", ["requirements", "architecture", "security", "performance", "documentation"]),
             "dependencies": parsed.get("dependencies", ["requirements"]),
             "next_agent": parsed.get("next_agent", "requirements"),
             "summary": parsed.get("summary", "Plan generated for the workflow."),
