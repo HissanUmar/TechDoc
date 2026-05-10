@@ -16,7 +16,8 @@ class RequirementsAnalystAgent(AgentBase):
 
     def process(self, payload: Dict[str, Any]):
         user_input = payload.get("user_input", "")
-        prompt = requirements_prompt(user_input)
+        clarification_answers = payload.get("clarification_answers", {})
+        prompt = requirements_prompt(user_input, clarification_answers)
         response, parsed, status = run_prompted_model(self.model, prompt)
         requirements = parsed.get("requirements", [
             "Multi-user authentication",
@@ -24,6 +25,7 @@ class RequirementsAnalystAgent(AgentBase):
             "Database persistence",
             "Error handling and logging",
         ])
+        questions = parsed.get("questions", [])
         return {
             "model_used": status["active_model"],
             "model_status": status,
@@ -31,7 +33,10 @@ class RequirementsAnalystAgent(AgentBase):
             "model_response": response.get("output", ""),
             "requirements": requirements,
             "assumptions": parsed.get("assumptions", ["Assumed baseline web application capabilities based on user goal"]),
-            "questions": parsed.get("questions", []),
+            "questions": questions,
+            "critical_gaps": parsed.get("critical_gaps", []),
+            "completeness_score": parsed.get("completeness_score", 50 if questions else 85),
+            "needs_clarification": bool(questions),
             "summary": parsed.get("summary", "Requirements shaped into a compact engineering brief."),
             "source": user_input[:50] if user_input else "default",
             "count": len(requirements),

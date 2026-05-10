@@ -249,6 +249,8 @@ class Supervisor:
 
         results: Dict[str, Any] = {}
         order: List[str] = []
+        clarification_answers = initial_context.get("clarification_answers", {}) or {}
+        coverage_threshold = int(initial_context.get("coverage_threshold", 80))
 
         def _emit(event: str, **data: Any) -> None:
             if progress_callback is not None:
@@ -283,12 +285,30 @@ class Supervisor:
                         candidate_reasons.setdefault(step, "planner included this step in its plan")
             _emit("planner_complete", next_candidates=list(next_candidates))
 
+        if "requirements" in self.agents:
+            _emit("decision", agent="requirements", reason="extract baseline requirements and detect clarification gaps")
+            req_payload = {
+                "user_input": initial_context.get("problem_statement", ""),
+                "clarification_answers": clarification_answers,
+            }
+            requirements_result = _run("requirements", req_payload)
+            questions = requirements_result.get("questions", []) if isinstance(requirements_result, dict) else []
+            needs_clarification = bool(questions) and not clarification_answers
+            if needs_clarification:
+                _emit("clarification_needed", agent="requirements", questions=questions, reason="requirements_incomplete")
+                _emit("stop", reason="clarification_needed")
+                results["clarification_needed"] = {"questions": questions}
+                return results, order
+
         # Fallback to known agent ordering if none suggested
         if not next_candidates:
-            next_candidates = [n for n in list(self.agents.keys()) if n != "planner"]
+            next_candidates = [n for n in list(self.agents.keys()) if n not in {"planner", "requirements"}]
             for name in next_candidates:
                 candidate_reasons[name] = "fallback ordering because planner did not return a next step"
             _emit("fallback_plan", next_candidates=list(next_candidates))
+
+        # requirements is handled as the intake stage above, so do not run it again later
+        next_candidates = [name for name in next_candidates if name != "requirements"]
 
         steps = 0
         # Execute adaptively
@@ -314,10 +334,20 @@ class Supervisor:
                 results["reviewer"] = rev_res
                 if "reviewer" not in order:
                     order.append("reviewer")
-                ready = isinstance(rev_res, dict) and rev_res.get("ready")
-                _emit("review_result", ready=ready, gaps=rev_res.get("gaps", []) if isinstance(rev_res, dict) else [])
+                decision = rev_res.get("decision") if isinstance(rev_res, dict) else None
+                coverage_score = rev_res.get("coverage_score", 0) if isinstance(rev_res, dict) else 0
+                ready = bool(isinstance(rev_res, dict) and rev_res.get("ready"))
+                if not ready and coverage_score >= coverage_threshold and decision != "clarify":
+                    ready = True
+                _emit(
+                    "review_result",
+                    ready=ready,
+                    decision=decision,
+                    coverage_score=coverage_score,
+                    gaps=rev_res.get("gaps", []) if isinstance(rev_res, dict) else [],
+                )
                 if ready:
-                    _emit("stop", reason="reviewer_ready", after=candidate)
+                    _emit("stop", reason="coverage_sufficient", after=candidate)
                     break
         else:
             _emit("stop", reason="plan_exhausted")

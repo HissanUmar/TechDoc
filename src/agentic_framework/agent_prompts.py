@@ -44,29 +44,38 @@ def extract_json_block(text: str) -> Dict[str, Any] | None:
     return None
 
 
-def requirements_prompt(user_input: str) -> str:
+def requirements_prompt(user_input: str, clarification_answers: Dict[str, Any] | None = None) -> str:
+    answers_text = _compact_json(clarification_answers or {})
     return f"""You are the Requirements Analyst.
 
 Goal:
 - Convert the raw request into a compact, actionable requirement set.
+- Identify whether the current information is sufficient to proceed or whether clarification is required.
 
 Rules:
 - Be concise.
 - Do not invent unsupported features.
 - Identify assumptions explicitly.
+- Prefer asking a small number of high-impact questions over making broad assumptions.
+- Use any clarification answers provided below to refine the requirements.
 - Return valid JSON only with keys:
-  - requirements: list of 3 to 6 concise requirement strings
-  - assumptions: list of strings
-  - questions: list of strings
-  - summary: one short string
+    - requirements: list of 3 to 8 concise requirement strings
+    - assumptions: list of strings
+    - questions: list of strings
+    - completeness_score: number from 0 to 100 indicating how complete the requirements are
+    - critical_gaps: list of strings
+    - summary: one short string
 
 User request:
 {user_input}
+
+Clarification answers already provided:
+{answers_text}
 """
 
 
 def planner_prompt(goal: str, context: Dict[str, Any]) -> str:
-        return f"""You are the Planner.
+    return f"""You are the Planner.
 
 Goal:
 - Convert the user's goal into a short execution plan for the agents.
@@ -169,16 +178,21 @@ Context:
 
 
 def reviewer_prompt(context: Dict[str, Any]) -> str:
-        return f"""You are the Reviewer.
+    return f"""You are the Reviewer.
 
 Goal:
-- Review the workflow outputs and judge whether the current state is ready.
+- Review the workflow outputs and judge whether the current state is complete enough to proceed.
 
 Rules:
-- Focus on gaps, contradictions, and readiness.
+- Focus on gaps, contradictions, completeness, and readiness.
+- Prefer progress over perfection: if the landscape is sufficiently covered and remaining gaps are minor, mark the workflow as ready.
+- If critical areas are still missing, ask for clarification instead of forcing completion.
 - Return valid JSON only with keys:
     - ready: boolean
+    - decision: string (one of: "proceed", "clarify", "stop")
+    - coverage_score: number from 0 to 100
     - gaps: list of strings
+    - critical_gaps: list of strings
     - improvements: list of strings
     - summary: one short string
 

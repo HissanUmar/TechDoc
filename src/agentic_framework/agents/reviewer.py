@@ -17,13 +17,18 @@ class ReviewerAgent(AgentBase):
     def process(self, payload: Dict[str, Any]):
         prompt = reviewer_prompt(payload)
         response, parsed, status = run_prompted_model(self.model, prompt)
+        decision = parsed.get("decision", "clarify" if not parsed.get("ready", False) else "proceed")
+        coverage_score = parsed.get("coverage_score", 0 if decision == "clarify" else 80)
         return {
             "model_used": status["active_model"],
             "model_status": status,
             "prompt": prompt,
             "model_response": response.get("output", ""),
             "ready": parsed.get("ready", True),
+            "decision": decision,
+            "coverage_score": coverage_score,
             "gaps": parsed.get("gaps", []),
+            "critical_gaps": parsed.get("critical_gaps", []),
             "improvements": parsed.get("improvements", []),
             "summary": parsed.get("summary", "Workflow reviewed for readiness."),
         }
