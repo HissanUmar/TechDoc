@@ -28,27 +28,61 @@ class RequirementsDocumentAgent:
 
     def run(self, prompt: str) -> Dict[str, Any]:
         prompt = self._normalize_prompt(prompt)
-        search_queries = self._build_search_queries(prompt)
+        topics = self._extract_topics(prompt)
+        search_queries = self._build_search_queries(topics)
         sources = self._search_sources(search_queries)
-        response = self._build_response(prompt, search_queries, sources)
+        response = self._build_response(prompt, topics, search_queries, sources)
         return {
             "prompt": prompt,
             "prompt_template": REQUIREMENTS_PROMPT,
+            "topics": topics,
             "search_queries": search_queries,
             "sources": sources,
             "response": response,
             "generated_at_utc": datetime.utcnow().isoformat() + "Z",
         }
 
-    def _build_search_queries(self, prompt: str) -> List[str]:
+    def _extract_topics(self, prompt: str) -> List[str]:
         text = prompt.lower()
-        queries = [prompt]
-        if any(w in text for w in ("ecommerce", "e-commerce", "store", "shop", "checkout")):
+        topic_map = [
+            (r"ecommerce|e-commerce|store|shop|marketplace", "ecommerce"),
+            (r"product|catalog|listing", "product catalog"),
+            (r"cart|checkout|basket", "cart checkout"),
+            (r"inventory|stock|warehouse", "inventory management"),
+            (r"payment|stripe|card|billing", "payments"),
+            (r"refund|return|returns", "refunds and returns"),
+            (r"shipping|fulfillment|delivery|tracking", "shipping and fulfillment"),
+            (r"tax|vat|dut[y]|customs", "taxes"),
+            (r"coupon|discount|promotion|promo", "promotions"),
+            (r"email|notification|smtp", "email notifications"),
+            (r"seo|search engine", "seo"),
+            (r"mobile|responsive", "mobile responsive"),
+            (r"postgres|database|sql", "postgres database"),
+            (r"admin|merchant|dashboard", "merchant admin"),
+        ]
+
+        topics: List[str] = []
+        for pattern, label in topic_map:
+            if re.search(pattern, text):
+                topics.append(label)
+
+        if not topics:
+            topics.append("general requirements")
+
+        return list(dict.fromkeys(topics))[:8]
+
+    def _build_search_queries(self, topics: List[str]) -> List[str]:
+        queries = []
+        if "ecommerce" in topics or "general requirements" in topics:
             queries.append("ecommerce requirements checkout inventory shipping payments best practices")
-        if any(w in text for w in ("payment", "refund", "tax")):
-            queries.append("online store payment refund tax requirements")
-        if any(w in text for w in ("catalog", "product", "inventory")):
-            queries.append("product catalog inventory management ecommerce requirements")
+        if any(topic in topics for topic in ("cart checkout", "payments", "refunds and returns")):
+            queries.append("online store payment refund checkout requirements")
+        if any(topic in topics for topic in ("inventory management", "shipping and fulfillment", "product catalog")):
+            queries.append("product catalog inventory fulfillment ecommerce requirements")
+        if any(topic in topics for topic in ("taxes", "promotions", "email notifications", "merchant admin")):
+            queries.append("online store tax promotions notifications admin requirements")
+        if any(topic in topics for topic in ("mobile responsive", "seo", "postgres database")):
+            queries.append("ecommerce mobile seo database best practices")
         return list(dict.fromkeys(queries))[:4]
 
     def _search_sources(self, queries: List[str]) -> List[Dict[str, str]]:
@@ -95,8 +129,12 @@ class RequirementsDocumentAgent:
             results.append({"title": title, "url": urljoin("https://html.duckduckgo.com", href), "snippet": snippet})
         return results
 
-    def _build_response(self, prompt: str, search_queries: List[str], sources: List[Dict[str, str]]) -> str:
-        lines = [REQUIREMENTS_PROMPT, "", "User request:", prompt, "", "Search queries:"]
+    def _build_response(self, prompt: str, topics: List[str], search_queries: List[str], sources: List[Dict[str, str]]) -> str:
+        lines = [REQUIREMENTS_PROMPT, "", "User request:", prompt, "", "Inferred topics:"]
+        for topic in topics:
+            lines.append(f"- {topic}")
+        lines.append("")
+        lines.append("Search queries:")
         for query in search_queries:
             lines.append(f"- {query}")
         lines.append("")
@@ -113,6 +151,10 @@ class RequirementsDocumentAgent:
                     lines.append(f"  {snippet}")
         else:
             lines.append("- No search results were returned.")
+            lines.append("")
+            lines.append("Fallback analysis:")
+            for topic in topics:
+                lines.append(f"- Focus on {topic} in the requirements response.")
         return "\n".join(lines)
 
     def _normalize_prompt(self, prompt: str) -> str:
