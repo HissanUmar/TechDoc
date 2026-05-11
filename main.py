@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from project_skeleton.cli import main
+from agentic_framework.cli import main
 
 
 if __name__ == "__main__":

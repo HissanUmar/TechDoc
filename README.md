@@ -18,7 +18,7 @@ streamlit run src/agentic_framework/streamlit_app.py
 ## Project Layout
 
 - `src/agentic_framework/streamlit_app.py` - standalone Streamlit UI and document generator
-- `src/project_skeleton/` - original CLI scaffold
+- `src/agentic_framework/cli.py` - lightweight CLI entry point
 - `tests/test_cli.py` - basic scaffold test
 
 ## Notes

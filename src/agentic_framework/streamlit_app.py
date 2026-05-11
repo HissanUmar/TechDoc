@@ -14,8 +14,11 @@ from typing import Any, Dict, List
 
 import streamlit as st
 
+from .requirements_agent import RequirementsDocumentAgent
+
 
 ARTIFACT_DIR = Path("artifacts") / "runs"
+_agent = RequirementsDocumentAgent()
 DEFAULT_PROMPT = (
     "Build an app for tracking clients, projects, tasks, meeting notes, and deadlines "
     "for a small consulting team."
@@ -261,13 +264,17 @@ def render_generate() -> None:
     st.session_state.current_prompt = prompt
 
     if st.button("Generate Document", width="stretch"):
-        document = build_document(prompt)
-        artifacts = export_artifacts(document)
-        st.session_state.latest_document = document
-        st.session_state.latest_artifacts = artifacts
-        st.session_state.run_history.insert(0, artifacts)
-        st.session_state.run_history = st.session_state.run_history[:10]
-        st.success("Document generated.")
+        try:
+            with st.spinner("Generating document with web search..."):
+                document = _agent.run(prompt)
+            artifacts = export_artifacts(document)
+            st.session_state.latest_document = document
+            st.session_state.latest_artifacts = artifacts
+            st.session_state.run_history.insert(0, artifacts)
+            st.session_state.run_history = st.session_state.run_history[:10]
+            st.success("Document generated with research sources.")
+        except Exception as e:
+            st.error(f"Error generating document: {e}")
 
     if st.session_state.latest_document:
         st.markdown("#### Current Output")

@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from project_skeleton.cli import main
+from agentic_framework.cli import main
 
 
 def test_main_prints_hello(capsys):
